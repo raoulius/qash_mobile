@@ -1,0 +1,43 @@
+name: qash_mobile
+description: Native printer shell hosting the Svelte PWA.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Hosts the Svelte PWA and exposes the JS bridge channel.
+  webview_flutter: ^4.8.0
+
+  # Android Classic/BLE/USB/Network printer connections + send().
+  # NOTE: iOS support in this package is BLE + network ONLY — it does
+  # NOT cover Classic/SPP on iOS. See bluetooth_service.dart header.
+  flutter_pos_printer_platform_image_3: ^1.2.4
+
+  # Builds ESC/POS command bytes from receipt data.
+  http: ^1.2.0
+
+  esc_pos_utils: ^1.1.0
+  # Runtime permission requests (Android 12+ BLUETOOTH_SCAN/CONNECT,
+  # legacy ACCESS_FINE_LOCATION on older Android).
+  permission_handler: ^11.3.0
+
+  # Used by permissions.dart to read the Android SDK version at runtime.
+  device_info_plus: ^10.1.0
+
+  # Lightweight persistence for "last connected printer" and the
+  # offline print job queue.
+  shared_preferences: ^2.2.3
+  fl_chart: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
