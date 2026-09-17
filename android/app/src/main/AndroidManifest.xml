@@ -18,6 +18,10 @@
          to miss on a fresh project). -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- "Receipt printed" notification — Android 13+ (API 33+) requires
+         this at runtime too; requested via permission_handler. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="qash_mobile"
         android:name="${applicationName}"

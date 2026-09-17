@@ -108,10 +108,8 @@ class _KpiCardTile extends StatelessWidget {
                 Expanded(
                   child: Text(
                     card.label.toUpperCase(),
-                    style: Theme.of(context)
-                        .textTheme
-                        .labelSmall
-                        ?.copyWith(color: Colors.grey),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ),
                 Container(
@@ -168,6 +166,7 @@ class _RevenueTrendCard extends StatelessWidget {
         ? 1.0
         : trend.series.reduce((a, b) => a > b ? a : b) * 1.2;
     final labelStep = (trend.labels.length / 5).ceil().clamp(1, 1000);
+    final primary = Theme.of(context).colorScheme.primary;
 
     return Card(
       child: Padding(
@@ -176,8 +175,8 @@ class _RevenueTrendCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Revenue Trend', style: Theme.of(context).textTheme.titleMedium),
-            const Text('Paid and pay-after revenue by day',
-                style: TextStyle(color: Colors.grey)),
+            Text('Paid and pay-after revenue by day',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             const SizedBox(height: 16),
             SizedBox(
               height: 220,
@@ -226,12 +225,12 @@ class _RevenueTrendCard extends StatelessWidget {
                                 FlSpot(i.toDouble(), trend.series[i]),
                             ],
                             isCurved: true,
-                            color: Colors.orange,
-                            barWidth: 2,
+                            color: primary,
+                            barWidth: 3,
                             dotData: const FlDotData(show: false),
                             belowBarData: BarAreaData(
                               show: true,
-                              color: Colors.orange.withValues(alpha: 0.15),
+                              color: primary.withValues(alpha: 0.15),
                             ),
                           ),
                         ],
@@ -250,12 +249,12 @@ class _OrderBreakdownCard extends StatelessWidget {
 
   const _OrderBreakdownCard({required this.breakdown});
 
-  static const _completedColor = Colors.green;
-  static const _pendingColor = Colors.amber;
-  static const _cancelledColor = Colors.red;
-
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final completedColor = scheme.primary;
+    final pendingColor = scheme.tertiary;
+    final cancelledColor = scheme.error;
     final total = breakdown.total;
     return Card(
       child: Padding(
@@ -264,8 +263,8 @@ class _OrderBreakdownCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Order Breakdown', style: Theme.of(context).textTheme.titleMedium),
-            const Text('Completed, pending, and cancelled payments',
-                style: TextStyle(color: Colors.grey)),
+            Text('Completed, pending, and cancelled payments',
+                style: TextStyle(color: scheme.onSurfaceVariant)),
             const SizedBox(height: 16),
             SizedBox(
               height: 180,
@@ -274,26 +273,26 @@ class _OrderBreakdownCard extends StatelessWidget {
                   : PieChart(
                       PieChartData(
                         centerSpaceRadius: 50,
-                        sectionsSpace: 2,
+                        sectionsSpace: 3,
                         sections: [
                           if (breakdown.completed > 0)
                             PieChartSectionData(
                               value: breakdown.completed.toDouble(),
-                              color: _completedColor,
+                              color: completedColor,
                               showTitle: false,
                               radius: 40,
                             ),
                           if (breakdown.pending > 0)
                             PieChartSectionData(
                               value: breakdown.pending.toDouble(),
-                              color: _pendingColor,
+                              color: pendingColor,
                               showTitle: false,
                               radius: 40,
                             ),
                           if (breakdown.cancelled > 0)
                             PieChartSectionData(
                               value: breakdown.cancelled.toDouble(),
-                              color: _cancelledColor,
+                              color: cancelledColor,
                               showTitle: false,
                               radius: 40,
                             ),
@@ -302,21 +301,25 @@ class _OrderBreakdownCard extends StatelessWidget {
                     ),
             ),
             const SizedBox(height: 16),
-            _legendRow('Completed', _completedColor, breakdown.completed),
-            _legendRow('Pending', _pendingColor, breakdown.pending),
-            _legendRow('Cancelled', _cancelledColor, breakdown.cancelled),
+            _legendRow(context, 'Completed', completedColor, breakdown.completed),
+            _legendRow(context, 'Pending', pendingColor, breakdown.pending),
+            _legendRow(context, 'Cancelled', cancelledColor, breakdown.cancelled),
           ],
         ),
       ),
     );
   }
 
-  Widget _legendRow(String label, Color color, int count) {
+  Widget _legendRow(BuildContext context, String label, Color color, int count) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Container(width: 12, height: 12, color: color),
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
           const SizedBox(width: 8),
           Expanded(child: Text(label)),
           Text('$count', style: const TextStyle(fontWeight: FontWeight.bold)),

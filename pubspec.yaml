@@ -33,6 +33,7 @@ dependencies:
   # offline print job queue.
   shared_preferences: ^2.2.3
   fl_chart: ^1.2.0
+  flutter_local_notifications: ^22.3.0
 
 dev_dependencies:
   flutter_test:
