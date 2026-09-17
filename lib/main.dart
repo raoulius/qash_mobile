@@ -4,7 +4,9 @@
 // After activation, DeviceConfig is saved to SharedPreferences and the
 // station screen starts automatically on every subsequent launch.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'app/theme.dart';
 import 'app/config/config_service.dart';
 import 'app/config/device_config.dart';
 import 'app/config/setup_screen.dart';
@@ -12,11 +14,15 @@ import 'app/printer/bluetooth_service.dart';
 import 'app/printer/print_queue.dart';
 import 'app/printer/poll_service.dart';
 import 'app/printer/reverb_service.dart';
+import 'app/printer/print_notifications.dart';
+import 'app/printer/printing_overlay.dart';
 import 'app/permissions/permissions.dart';
 import 'app/dashboard/dashboard_stats_service.dart';
 import 'app/dashboard/dashboard_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  PrintNotifications.init();
   runApp(const PrintStationApp());
 }
 
@@ -28,7 +34,9 @@ class PrintStationApp extends StatelessWidget {
     return MaterialApp(
       title: 'Print Station',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      themeMode: ThemeMode.system,
       home: const _Launcher(),
     );
   }
@@ -97,6 +105,9 @@ class _StationScreenState extends State<StationScreen> {
   String _pushStatus = 'starting…';
   int _navIndex = 0;
 
+  PrintingOverlayState _overlayState = PrintingOverlayState.hidden;
+  Timer? _overlayHideTimer;
+
   @override
   void initState() {
     super.initState();
@@ -136,6 +147,7 @@ class _StationScreenState extends State<StationScreen> {
     _reverbService.status.listen((s) {
       setState(() => _pushStatus = s);
     });
+    _printQueue.jobUpdates.listen(_onJobUpdate);
 
     _bootstrap();
   }
@@ -159,6 +171,23 @@ class _StationScreenState extends State<StationScreen> {
         setState(() => _printerStatus = 'no printer — tap to connect');
       }
     });
+  }
+
+  void _onJobUpdate(PrintJob job) {
+    _overlayHideTimer?.cancel();
+    switch (job.status) {
+      case PrintJobStatus.printing:
+        setState(() => _overlayState = PrintingOverlayState.printing);
+      case PrintJobStatus.success:
+        setState(() => _overlayState = PrintingOverlayState.success);
+        PrintNotifications.notifyPrinted(job.id);
+        _overlayHideTimer = Timer(const Duration(milliseconds: 900), () {
+          if (mounted) setState(() => _overlayState = PrintingOverlayState.hidden);
+        });
+      case PrintJobStatus.queued:
+      case PrintJobStatus.failed:
+        setState(() => _overlayState = PrintingOverlayState.hidden);
+    }
   }
 
   Future<void> _pickPrinter() async {
@@ -197,6 +226,7 @@ class _StationScreenState extends State<StationScreen> {
 
   @override
   void dispose() {
+    _overlayHideTimer?.cancel();
     _reverbService.dispose();
     _pollService.dispose();
     _printQueue.dispose();
@@ -207,11 +237,16 @@ class _StationScreenState extends State<StationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _navIndex,
+      body: Stack(
         children: [
-          _buildStationTab(context),
-          DashboardScreen(statsService: _dashboardStatsService),
+          IndexedStack(
+            index: _navIndex,
+            children: [
+              _buildStationTab(context),
+              DashboardScreen(statsService: _dashboardStatsService),
+            ],
+          ),
+          Positioned.fill(child: PrintingOverlay(state: _overlayState)),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -240,37 +275,91 @@ class _StationScreenState extends State<StationScreen> {
         ],
       ),
       body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.print, size: 64),
-            const SizedBox(height: 24),
-            Text('Printer: $_printerStatus',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text('Poll: $_pollStatus',
-                style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: 4),
-            Text('Push: $_pushStatus',
-                style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: 32),
-            FilledButton.icon(
-              onPressed: _pickPrinter,
-              icon: const Icon(Icons.bluetooth_searching),
-              label: const Text('Connect / change printer'),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.print,
+                      size: 48,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer),
+                ),
+                const SizedBox(height: 24),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      children: [
+                        _StatusRow(icon: Icons.bluetooth, label: 'Printer', value: _printerStatus),
+                        const Divider(height: 24),
+                        _StatusRow(icon: Icons.sync, label: 'Poll', value: _pollStatus),
+                        const Divider(height: 24),
+                        _StatusRow(icon: Icons.cloud_sync, label: 'Push', value: _pushStatus),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: _pickPrinter,
+                  icon: const Icon(Icons.bluetooth_searching),
+                  label: const Text('Connect / change printer'),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Keep this app open during your shift so receipts print '
+                  'automatically as transactions complete.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 32),
-              child: Text(
-                'Keep this app open during your shift so receipts print '
-                'automatically as transactions complete.',
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _StatusRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _StatusRow({required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: scheme.primary),
+        const SizedBox(width: 12),
+        Text(label, style: Theme.of(context).textTheme.titleMedium),
+        const Spacer(),
+        Flexible(
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+        ),
+      ],
     );
   }
 }

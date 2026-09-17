@@ -1,4 +1,4 @@
-package com.example.qash_mobile
+package com.qashmobile.app
 
 import io.flutter.embedding.android.FlutterActivity
 

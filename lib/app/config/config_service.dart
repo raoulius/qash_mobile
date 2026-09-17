@@ -31,10 +31,9 @@ class ConfigService {
     await prefs.remove(_kConfigKey);
   }
 
-  /// Exchanges an activation token for a full DeviceConfig.
-  /// [baseUrl] is the only thing shipped in the app (e.g. 'https://withqash-demo.tech').
-  static Future<DeviceConfig> activate(String baseUrl, String token) async {
-    final uri = Uri.parse('$baseUrl/api/device/activate');
+  /// Exchanges an activation token for a full DeviceConfig against [centralUrl].
+  static Future<DeviceConfig> activate(String token) async {
+    final uri = Uri.parse('$centralUrl/api/device/activate');
     final req = http.Request('POST', uri)
       ..headers.addAll({'Accept': 'application/json', 'Content-Type': 'application/json'})
       ..body = jsonEncode({'activation_token': token.trim().toUpperCase()});

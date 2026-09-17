@@ -1,0 +1,34 @@
+PODS:
+  - device_info_plus (0.0.1):
+    - Flutter
+  - Flutter (1.0.0)
+  - flutter_pos_printer_platform_image_3 (0.0.1):
+    - Flutter
+  - network_info_plus (0.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - device_info_plus (from `.symlinks/plugins/device_info_plus/ios`)
+  - Flutter (from `Flutter`)
+  - flutter_pos_printer_platform_image_3 (from `.symlinks/plugins/flutter_pos_printer_platform_image_3/ios`)
+  - network_info_plus (from `.symlinks/plugins/network_info_plus/ios`)
+
+EXTERNAL SOURCES:
+  device_info_plus:
+    :path: ".symlinks/plugins/device_info_plus/ios"
+  Flutter:
+    :path: Flutter
+  flutter_pos_printer_platform_image_3:
+    :path: ".symlinks/plugins/flutter_pos_printer_platform_image_3/ios"
+  network_info_plus:
+    :path: ".symlinks/plugins/network_info_plus/ios"
+
+SPEC CHECKSUMS:
+  device_info_plus: 97af1d7e84681a90d0693e63169a5d50e0839a0d
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_pos_printer_platform_image_3: 00c882895b89c55a6d369a4203dbd6eebd5c6f9a
+  network_info_plus: 6d0c3eb8367b8164fa3fb0c19875e3f59d49697f
+
+PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+
+COCOAPODS: 1.16.2
