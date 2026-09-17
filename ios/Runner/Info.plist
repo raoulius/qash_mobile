@@ -75,9 +75,11 @@
 
 	<!--
 	  TODO: replace the placeholder string below with the real MFi
-	  protocol string read from your RPP02N via the Swift debug snippet
-	  in bluetooth_service.dart. Must exactly match _iosProtocolString
-	  in that file.
+	  protocol string. To find it: pair the RPP02N in Settings > Bluetooth,
+	  build the app to a physical iPhone, and call the "listAccessories"
+	  method on the "qash/printer_ea" channel (PrinterEAChannel.swift) —
+	  it returns each paired accessory's protocolStrings. Must exactly
+	  match _iosProtocolString in bluetooth_service.dart.
 	-->
 	<key>UISupportedExternalAccessoryProtocols</key>
 	<array>

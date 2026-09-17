@@ -25,25 +25,25 @@
 //     does NOT cover this path.
 //
 // This file exposes ONE interface (scan / connect / print / disconnect)
-// and routes to the correct implementation per-platform internally. The
-// Android half is fully implemented below. The iOS half needs the MFi
-// protocol string filled in — see _IosClassicPrinter and the TODO there.
+// and routes to the correct implementation per-platform internally. Both
+// halves are implemented: Android via flutter_pos_printer_platform_image_3
+// below, iOS via a MethodChannel to ios/Runner/PrinterEAChannel.swift.
+// The iOS half still needs the MFi protocol string filled in — see the
+// TODO on _iosProtocolString below.
 //
-// HOW TO FIND THE iOS PROTOCOL STRING (do this during the Phase 1 spike):
-//   1. Build a tiny test screen that calls EAAccessoryManager and logs
-//      `accessory.protocolStrings` for all connectedAccessories.
-//      (A short Swift snippet for this is in the comment at the bottom
-//      of this file — wire it into a MethodChannel temporarily.)
-//   2. Pair the RPP02N as you already have, then run that debug call.
-//   3. Whatever string(s) print out, paste them into Info.plist under
-//      UISupportedExternalAccessoryProtocols AND into PROTOCOL_STRING
-//      below.
+// HOW TO FIND THE iOS PROTOCOL STRING:
+//   1. Pair the RPP02N in Settings > Bluetooth, build to a physical
+//      iPhone (EA does not work in the Simulator).
+//   2. Call _iosChannel.invokeMethod('listAccessories') — it returns
+//      each paired accessory's name + protocolStrings.
+//   3. Paste the matching string into UISupportedExternalAccessoryProtocols
+//      in Info.plist AND into _iosProtocolString below.
 //   4. Some printer vendors document this string directly in their SDK
-//      manual — worth a quick check before doing step 1-3 manually.
+//      manual — worth a quick check before doing step 1-2 manually.
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
+import 'package:flutter/services.dart';
 import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -202,85 +202,51 @@ class BluetoothPrinterService {
 
   // ---- iOS implementation (ExternalAccessory / MFi Classic) -----------
   //
-  // NOT YET FUNCTIONAL — requires the MFi protocol string (see file
-  // header). The shape below is correct; PROTOCOL_STRING is the only
-  // missing piece. Until it's filled in, these methods throw clearly
-  // rather than silently doing nothing, so a missed iOS test shows up
-  // immediately instead of shipping broken.
+  // Backed by ios/Runner/PrinterEAChannel.swift over MethodChannel
+  // "qash/printer_ea". EA accessories must already be paired at the OS
+  // level (Settings > Bluetooth) — there is no live scan on iOS, "scan"
+  // just lists paired accessories matching our protocol string.
 
-  // TODO: replace with the real protocol string found via the debug
-  // helper described in the file header, e.g. "com.rongta.print" —
-  // this is a placeholder and WILL NOT WORK as-is.
+  static const MethodChannel _iosChannel = MethodChannel('qash/printer_ea');
+
+  // TODO: replace with the real protocol string. Find it by calling
+  // _iosChannel.invokeMethod('listAccessories') on a physical iPhone with
+  // the RPP02N paired — it returns each accessory's protocolStrings. Must
+  // exactly match UISupportedExternalAccessoryProtocols in Info.plist.
   static const String _iosProtocolString =
       'REPLACE_WITH_REAL_MFI_PROTOCOL_STRING';
 
   Future<List<PrinterDeviceInfo>> _iosScan(Duration timeout) async {
-    // ExternalAccessory does not "scan" the way Bluetooth Classic does on
-    // Android — MFi accessories must already be paired at the OS level
-    // (Settings > Bluetooth), which yours already is. So "scanning" on
-    // iOS really means: list currently connected/paired EA accessories
-    // matching our protocol string.
-    //
-    // This requires a small native Swift MethodChannel calling
-    // EAAccessoryManager.shared().connectedAccessories, filtered by
-    // protocolStrings.contains(_iosProtocolString). Not implemented here
-    // because it needs native Swift code living in ios/Runner, not Dart —
-    // see the Swift snippet at the bottom of this file to wire that up.
-    throw UnimplementedError(
-      'iOS Classic/MFi scanning requires a native ExternalAccessory '
-      'MethodChannel — see comment block at the bottom of bluetooth_service.dart',
+    final result = await _iosChannel.invokeMethod<List<Object?>>(
+      'scan',
+      {'protocolString': _iosProtocolString},
     );
+    return (result ?? [])
+        .cast<Map<Object?, Object?>>()
+        .map((m) => PrinterDeviceInfo(
+              name: m['name'] as String? ?? 'Unknown printer',
+              address: m['address'] as String? ?? '',
+            ))
+        .toList();
   }
 
   Future<void> _iosConnect(PrinterDeviceInfo device) async {
-    throw UnimplementedError(
-      'iOS Classic/MFi connect requires the native ExternalAccessory '
-      'session — fill in _iosProtocolString and the native channel first',
-    );
+    await _iosChannel.invokeMethod('connect', {
+      'address': device.address,
+      'protocolString': _iosProtocolString,
+    });
   }
 
   Future<void> _iosDisconnect() async {
-    throw UnimplementedError(
-        'See _iosConnect — native EA session not wired up yet');
+    await _iosChannel.invokeMethod('disconnect');
   }
 
   Future<void> _iosPrint(Uint8List bytes) async {
-    throw UnimplementedError(
-        'See _iosConnect — native EA session not wired up yet');
+    await _iosChannel.invokeMethod('print', {'bytes': bytes});
   }
 }
 
-/*
- * SWIFT SNIPPET — for finding / using the MFi protocol string on iOS.
- * This is NOT Dart, it does not belong in this file's compiled output —
- * it's reference for the native ios/Runner/AppDelegate.swift work needed
- * to complete _iosScan/_iosConnect/_iosPrint above.
- *
- * import ExternalAccessory
- *
- * func debugListConnectedAccessories() {
- *     let manager = EAAccessoryManager.shared()
- *     for accessory in manager.connectedAccessories {
- *         print("Name: \(accessory.name)")
- *         print("Protocols: \(accessory.protocolStrings)")
- *     }
- * }
- *
- * func openSession(protocolString: String) -> EASession? {
- *     let manager = EAAccessoryManager.shared()
- *     guard let accessory = manager.connectedAccessories.first(where: {
- *         $0.protocolStrings.contains(protocolString)
- *     }) else { return nil }
- *     let session = EASession(accessory: accessory, forProtocol: protocolString)
- *     session?.outputStream?.open()
- *     return session
- * }
- *
- * // Writing bytes once the session's outputStream is open:
- * // let written = session.outputStream?.write(bytes, maxLength: bytes.count)
- *
- * Wire debugListConnectedAccessories() behind a temporary MethodChannel
- * call during the Phase 1 spike to read the real protocol string off your
- * physical RPP02N, then delete the temporary channel once
- * _iosProtocolString is filled in for good.
- */
+// The native EA implementation lives in ios/Runner/PrinterEAChannel.swift
+// (channel "qash/printer_ea") — see that file for connect/print/backpressure
+// details, and its "listAccessories" method for discovering the protocol
+// string above.
