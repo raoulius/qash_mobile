@@ -1,5 +1,5 @@
 name: qash_mobile
-description: Native printer shell hosting the Svelte PWA.
+description: Qash print station — prints backoffice print jobs to a Bluetooth ESC/POS printer.
 publish_to: 'none'
 version: 0.1.0
 
@@ -9,9 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
-  # Hosts the Svelte PWA and exposes the JS bridge channel.
-  webview_flutter: ^4.8.0
 
   # Android Classic/BLE/USB/Network printer connections + send().
   # NOTE: iOS support in this package is BLE + network ONLY — it does

@@ -1,20 +1,18 @@
 // poll_service.dart
 //
-// The new "trigger" for printing in the headless print-station model.
-// Replaces the old WebView + bridge approach: instead of an in-app UI
-// asking to print, this service asks Laravel "any receipts waiting?" on
-// a timer, and feeds whatever comes back into the SAME PrintQueue you
-// already built. Nothing downstream of PrintQueue changed.
+// The reliable "trigger" for printing: asks Laravel "any receipts waiting?"
+// on a timer and feeds whatever comes back into PrintQueue. Reverb
+// (reverb_service.dart) is the fast path; this is the one that can't miss.
 //
 // WHY POLLING, NOT A WEBSOCKET: a phone that sleeps/backgrounds can't
 // reliably hold an open socket — the OS suspends it. A poll is a fresh
 // short HTTP request each time, which survives sleep/wake far better:
 // miss a few while asleep, catch up on the next one when foregrounded.
 //
-// V1 ASSUMPTION: the app is foregrounded during a shift. While
-// backgrounded/asleep, the timer pauses (the OS suspends it) and
-// resumes on return — jobs are NOT lost because they stay 'pending' in
-// Laravel until acknowledged, they just wait until the app is active.
+// BACKGROUND: on Android the StationService foreground service keeps the
+// process (and this timer) alive when the app is backgrounded. On iOS the
+// timer pauses while backgrounded and resumes on return — jobs are NOT lost
+// because they stay 'pending' in Laravel until acknowledged.
 //
 // SAFETY MODEL: a job is only removed from Laravel's pending list after
 // THIS service confirms a successful print and calls markPrinted. If the

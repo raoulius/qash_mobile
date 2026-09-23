@@ -1,10 +1,9 @@
 // bluetooth_service.dart
 //
-// THIS IS THE FILE TO TEST FIRST, IN ISOLATION, AGAINST THE REAL RPP02N —
-// before wiring it into the bridge or anything else. Everything upstream
-// (printer_bridge.dart, the Svelte app) assumes this file's public API
-// works exactly as declared. If it doesn't, that's a contained, one-file
-// problem, not a tangled one.
+// The only file that talks to the printer hardware. Everything upstream
+// (print_queue.dart and the station screen) assumes this file's public API
+// works exactly as declared, so test it against the real RPP02N first when
+// something prints wrong — it's a contained, one-file problem.
 //
 // WHY ANDROID AND iOS ARE HANDLED DIFFERENTLY (read this before editing):
 //

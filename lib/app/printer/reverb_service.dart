@@ -9,11 +9,9 @@
 // Both services feed the SAME PrintQueue. Reverb is the fast path (jobs
 // print the moment they're created); polling is the fallback that catches
 // jobs missed while the socket was down or the app was backgrounded.
-// Running both in parallel is safe because PrintQueue's deduplication key
-// is the Laravel job id stored in the receipt payload — duplicate enqueues
-// for the same id are not a concern here because the server only delivers
-// each job once per channel event, and polling only picks up jobs still
-// marked 'pending' (already marked printed = not returned).
+// Running both in parallel is safe because PrintQueue deduplicates on the
+// Laravel job id (`_serverJobId`): a job pushed here and then re-offered by
+// the poll before its acknowledgement lands prints once.
 //
 // PUSHER PROTOCOL SUMMARY (what this file implements):
 //   1. Connect WS to wss://{host}:{port}/app/{appKey}?protocol=7
