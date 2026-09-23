@@ -147,7 +147,7 @@ class _PrinterFeed extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 32),
-        Text('Printing receipt…', style: Theme.of(context).textTheme.titleMedium),
+        Text('Mencetak struk…', style: Theme.of(context).textTheme.titleMedium),
       ],
     );
   }
@@ -164,7 +164,7 @@ class _PrintedCheck extends StatelessWidget {
       children: [
         Icon(Icons.check_circle, color: scheme.primary, size: 80),
         const SizedBox(height: 16),
-        Text('Printed!', style: Theme.of(context).textTheme.titleLarge),
+        Text('Tercetak!', style: Theme.of(context).textTheme.titleLarge),
       ],
     );
   }

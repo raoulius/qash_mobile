@@ -53,16 +53,40 @@ class _FailedJobsScreenState extends State<FailedJobsScreen> {
                 return ListTile(
                   leading: const Icon(Icons.error_outline),
                   title: Text(_title(job)),
-                  subtitle: Text('${_when(job)} — ${job.lastError ?? 'gagal'}', maxLines: 2, overflow: TextOverflow.ellipsis),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.print),
-                    tooltip: 'Cetak ulang',
-                    onPressed: () => widget.printQueue.reprint(job.id),
+                  subtitle: Text('${_when(job)} — ${job.lastError?.replaceFirst('Bad state: ', '') ?? 'gagal'}', maxLines: 2, overflow: TextOverflow.ellipsis),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.print),
+                        tooltip: 'Cetak ulang',
+                        onPressed: () => _reprint(job),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: 'Hapus',
+                        onPressed: () => _remove(job),
+                      ),
+                    ],
                   ),
                 );
               },
             ),
     );
+  }
+
+  Future<void> _reprint(PrintJob job) async {
+    await widget.printQueue.reprint(job.id);
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('${_title(job)} dicetak ulang')));
+  }
+
+  /// Already reported failed to the server; this only clears the local list.
+  Future<void> _remove(PrintJob job) async {
+    await widget.printQueue.remove(job.id);
+    await _load();
   }
 
   static String _title(PrintJob job) {
@@ -74,6 +98,7 @@ class _FailedJobsScreenState extends State<FailedJobsScreen> {
       'table_qr' => 'QR Meja',
       'session_open' => 'Buka sesi',
       'session_close' => 'Tutup sesi',
+      'test_print' => 'Tes cetak',
       _ => 'Struk',
     };
     final ref = header['orderNumber'] ?? p['tableName'] ?? header['tableNumber'];

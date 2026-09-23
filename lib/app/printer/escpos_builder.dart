@@ -46,6 +46,7 @@ class EscPosBuilder {
       'table_qr' => _tableQr(g, payload, tpl),
       'session_open' => _sessionOpen(g, payload, tpl),
       'session_close' => _sessionClose(g, payload, tpl),
+      'test_print' => _testPrint(g, payload, tpl),
       _ => _receipt(g, payload, tpl),
     };
 
@@ -262,6 +263,19 @@ class EscPosBuilder {
     b += _kv(g, tpl, 'Kode', _s(station, 'code'));
     b += _kv(g, tpl, 'Kasir', _s(_map(p['cashier']), 'name'));
     b += _kv(g, tpl, 'Hari Usaha', _s(p, 'businessDay'));
+    return b;
+  }
+
+  // ---- local test slip (station "Tes cetak" button) ------------------------
+
+  static List<int> _testPrint(Generator g, Map<String, dynamic> p, _Template tpl) {
+    var b = g.text('TES CETAK', styles: _centerBold2);
+    b += g.hr();
+    b += _kv(g, tpl, 'Station', _s(p, 'station'));
+    b += _kv(g, tpl, 'Printer', _s(p, 'printer'));
+    b += _kv(g, tpl, 'Waktu', _s(p, 'printedAt'));
+    b += g.hr();
+    b += g.text('Printer siap digunakan.', styles: _center);
     return b;
   }
 

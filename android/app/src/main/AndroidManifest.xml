@@ -27,6 +27,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
+    <!-- One-time "don't optimise battery" prompt (permissions.dart): OEM
+         battery managers otherwise kill the station service. Play policy
+         restricts this permission — if the listing is rejected, drop it and
+         deep-link to Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
         android:label="Qash Mobile"
         android:name="${applicationName}"

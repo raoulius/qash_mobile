@@ -158,4 +158,15 @@ void main() {
     expect(await queue.failedJobs(), isEmpty);
     expect(await _stored(), isEmpty);
   });
+
+  test('reprinting from the Gagal tab replaces the failed entry', () async {
+    await _seed([_job('1', 'failed', serverId: '80', attempts: 3)]);
+    final queue = PrintQueue(printerService: BluetoothPrinterService());
+
+    await queue.reprint('1');
+
+    final ids = (await _stored()).map((j) => j['id']).toList();
+    expect(ids, isNot(contains('1')), reason: 'a second tap must not print a second copy');
+    expect(ids.length, 1);
+  });
 }

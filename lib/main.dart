@@ -104,10 +104,11 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
   late final ReverbService _reverbService;
   late final DashboardStatsService _dashboardStatsService;
 
-  String _printerStatus = 'starting…';
-  String _pollStatus = 'starting…';
-  String _pushStatus = 'starting…';
+  String _printerStatus = 'Memulai…';
+  String _pollStatus = 'Memulai…';
+  String _pushStatus = 'Memulai…';
   int _navIndex = 0;
+  int _failedCount = 0;
 
   PrintingOverlayState _overlayState = PrintingOverlayState.hidden;
   final _overlayTracker = PrintingOverlayTracker();
@@ -153,7 +154,13 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
     );
 
     _printerService.connectionState.listen((s) {
-      setState(() => _printerStatus = s.name);
+      setState(() => _printerStatus = switch (s) {
+            PrinterConnectionState.connected =>
+              'Terhubung: ${_printerService.connectedDevice?.name ?? 'printer'}',
+            PrinterConnectionState.connecting => 'Menghubungkan…',
+            PrinterConnectionState.disconnected => 'Tidak terhubung',
+            PrinterConnectionState.error => 'Gagal terhubung',
+          });
     });
     // Printer dropped (powered off, out of range): retry the last-known
     // device every 30s so the cashier doesn't have to notice and tap.
@@ -192,6 +199,10 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
     if (_started) return; // two quick resumes can both re-run bootstrap
     _started = true;
     await _printQueue.pruneCompleted();
+    _refreshFailedCount();
+    // After Bluetooth, so first launch doesn't stack prompts before setup.
+    await PrintNotifications.requestPermission();
+    await BluetoothPermissions.askBatteryExemptionOnce();
 
     // Keep the screen on and hold a foreground service so polling survives
     // the cashier switching apps or the screen timing out.
@@ -204,7 +215,7 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
     // Bluetooth reconnect runs in parallel; UI updates via connectionState stream.
     _printerService.reconnectToLastKnown().then((reconnected) {
       if (!reconnected && mounted) {
-        setState(() => _printerStatus = 'no printer — tap to connect');
+        setState(() => _printerStatus = 'Belum ada printer — ketuk Hubungkan');
       }
     });
   }
@@ -219,8 +230,14 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
   }
 
   void _onJobUpdate(PrintJob job) {
-    if (job.status == PrintJobStatus.success) {
+    // In the foreground the overlay already says it; notify only when the
+    // cashier is in another app.
+    if (job.status == PrintJobStatus.success &&
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
       PrintNotifications.notifyPrinted(job.id);
+    }
+    if (job.status == PrintJobStatus.failed || job.status == PrintJobStatus.success) {
+      _refreshFailedCount();
     }
 
     final next = _overlayTracker.onJob(job.id, job.status);
@@ -234,18 +251,37 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
     }
   }
 
+  Future<void> _refreshFailedCount() async {
+    final n = (await _printQueue.failedJobs()).length;
+    if (mounted && n != _failedCount) setState(() => _failedCount = n);
+  }
+
+  /// Local slip, no server job id: proves the printer link without touching
+  /// the backend. 58mm layout so it also fits the narrow RPP02N.
+  Future<void> _testPrint() async {
+    final cfg = widget.config;
+    await _printQueue.enqueue({
+      '_jobType': 'test_print',
+      'template': {'paperWidth': '58'},
+      'header': {'outletName': cfg.tenantId},
+      'station': cfg.stationId,
+      'printer': _printerService.connectedDevice?.name,
+      'printedAt': DateTime.now().toString().substring(0, 16),
+    });
+  }
+
   Future<void> _pickPrinter() async {
-    setState(() => _printerStatus = 'scanning…');
+    setState(() => _printerStatus = 'Mencari printer…');
     final devices = await _printerService.scan();
     if (!mounted) return;
     if (devices.isEmpty) {
-      setState(() => _printerStatus = 'no printers found');
+      setState(() => _printerStatus = 'Printer tidak ditemukan');
       return;
     }
     final chosen = await showDialog<PrinterDeviceInfo>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        title: const Text('Select printer'),
+        title: const Text('Pilih printer'),
         children: devices
             .map((d) => SimpleDialogOption(
                   onPressed: () => Navigator.pop(ctx, d),
@@ -326,10 +362,17 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
       bottomNavigationBar: NavigationBar(
         selectedIndex: _navIndex,
         onDestinationSelected: (i) => setState(() => _navIndex = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.print), label: 'Station'),
-          NavigationDestination(icon: Icon(Icons.error_outline), label: 'Gagal'),
-          NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.print), label: 'Printer'),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: _failedCount > 0,
+              label: Text('$_failedCount'),
+              child: const Icon(Icons.error_outline),
+            ),
+            label: 'Gagal',
+          ),
+          const NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
         ],
       ),
     );
@@ -390,7 +433,7 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
           PopupMenuButton<String>(
             onSelected: (v) { if (v == 'reset') _resetDevice(); },
             itemBuilder: (_) => [
-              const PopupMenuItem(value: 'reset', child: Text('Reset device…')),
+              const PopupMenuItem(value: 'reset', child: Text('Reset perangkat…')),
             ],
           ),
         ],
@@ -421,9 +464,9 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
                       children: [
                         _StatusRow(icon: Icons.bluetooth, label: 'Printer', value: _printerStatus),
                         const Divider(height: 24),
-                        _StatusRow(icon: Icons.sync, label: 'Poll', value: _pollStatus),
+                        _StatusRow(icon: Icons.sync, label: 'Server', value: _pollStatus),
                         const Divider(height: 24),
-                        _StatusRow(icon: Icons.cloud_sync, label: 'Push', value: _pushStatus),
+                        _StatusRow(icon: Icons.cloud_sync, label: 'Real-time', value: _pushStatus),
                       ],
                     ),
                   ),
@@ -440,12 +483,20 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
                 FilledButton.icon(
                   onPressed: _pickPrinter,
                   icon: const Icon(Icons.bluetooth_searching),
-                  label: const Text('Connect / change printer'),
+                  label: const Text('Hubungkan / ganti printer'),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _printerService.currentState == PrinterConnectionState.connected
+                      ? _testPrint
+                      : null,
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text('Tes cetak'),
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Keep this app open during your shift so receipts print '
-                  'automatically as transactions complete.',
+                  'Biarkan aplikasi ini terbuka selama shift agar struk '
+                  'tercetak otomatis setiap transaksi selesai.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context)
                       .textTheme

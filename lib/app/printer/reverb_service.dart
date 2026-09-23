@@ -91,7 +91,7 @@ class ReverbService {
 
   Future<void> _connect() async {
     if (_disposed) return;
-    _emit('connecting…');
+    _emit('Menghubungkan…');
     try {
       final scheme = secure ? 'wss' : 'ws';
       final uri =
@@ -102,7 +102,7 @@ class ReverbService {
         await _socket!.close(); // reset while connecting
         return;
       }
-      _emit('connected');
+      _emit('Terhubung');
 
       _socket!.listen(
         _onMessage,
@@ -111,7 +111,7 @@ class ReverbService {
         cancelOnError: true,
       );
     } catch (e) {
-      _emit('ws error: $e');
+      _emit('Gagal terhubung — mencoba lagi');
       _scheduleReconnect();
     }
   }
@@ -142,16 +142,16 @@ class ReverbService {
   }
 
   Future<void> _subscribeChannel(String socketId) async {
-    _emit('authenticating…');
+    _emit('Autentikasi…');
     try {
       final auth = await _fetchChannelAuth(socketId);
       _send({
         'event': 'pusher:subscribe',
         'data': {'channel': _channelName, 'auth': auth},
       });
-      _emit('subscribed');
+      _emit('Aktif');
     } catch (e) {
-      _emit('channel auth failed');
+      _emit('Autentikasi gagal — mencoba lagi');
       // Close socket so the reconnect loop retries with a fresh connection
       _socket?.close();
     }
@@ -210,7 +210,7 @@ class ReverbService {
   void _onDisconnect() {
     _socket = null;
     if (!_disposed) {
-      _emit('disconnected — reconnecting…');
+      _emit('Terputus — menyambung ulang…');
       _scheduleReconnect();
     }
   }

@@ -120,10 +120,15 @@ class PrintQueue {
   /// Re-queues a previously failed or completed job by id — used for the
   /// "reprint" button. Cheaper than re-fetching from Laravel since the
   /// receipt data is already cached on-device.
+  ///
+  /// A failed original is replaced by the new attempt, so the Gagal tab
+  /// drops it at once — left there, a second tap printed a second copy. If
+  /// the retry fails too, the new job shows up in its place.
   Future<void> reprint(String jobId) async {
     final jobs = await _loadJobs();
     final existing = jobs.firstWhere((j) => j.id == jobId,
         orElse: () => throw ArgumentError('Unknown job id: $jobId'));
+    if (existing.status == PrintJobStatus.failed) jobs.remove(existing);
     await enqueue(existing.receiptJson, force: true);
   }
 
@@ -173,7 +178,7 @@ class PrintQueue {
       if (printerService.connectedDevice == null) {
         final reconnected = await printerService.reconnectToLastKnown();
         if (!reconnected) {
-          throw StateError('No printer connected and no known device to reconnect to');
+          throw StateError('Printer tidak terhubung dan belum pernah dipilih');
         }
       }
 

@@ -44,7 +44,7 @@ class _SetupScreenState extends State<SetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Device Setup')),
+      appBar: AppBar(title: const Text('Aktivasi Perangkat')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 400),
@@ -59,13 +59,13 @@ class _SetupScreenState extends State<SetupScreen> {
                   Image.asset(AppTheme.logo(context, 'main_logo'), height: 120),
                   const SizedBox(height: 24),
                   Text(
-                    'Print Station Setup',
+                    'Aktivasi Print Station',
                     style: Theme.of(context).textTheme.headlineSmall,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Enter the activation token provided by your administrator.',
+                    'Masukkan token aktivasi dari admin (menu Print Stations di backoffice).',
                     style: Theme.of(context).textTheme.bodyMedium,
                     textAlign: TextAlign.center,
                   ),
@@ -73,15 +73,15 @@ class _SetupScreenState extends State<SetupScreen> {
                   TextFormField(
                     controller: _tokenController,
                     decoration: const InputDecoration(
-                      labelText: 'Activation Token',
-                      hintText: 'XXXX (4 characters)',
+                      labelText: 'Token aktivasi',
+                      hintText: 'XXXX (4 karakter)',
                       border: OutlineInputBorder(),
                     ),
                     autocorrect: false,
                     textCapitalization: TextCapitalization.characters,
                     maxLength: 4,
                     validator: (v) {
-                      if (v == null || v.trim().length != 4) return 'Must be exactly 4 characters';
+                      if (v == null || v.trim().length != 4) return 'Harus tepat 4 karakter';
                       return null;
                     },
                   ),
@@ -94,7 +94,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     onPressed: _loading ? null : _activate,
                     child: _loading
                         ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Activate'),
+                        : const Text('Aktifkan'),
                   ),
                 ],
               ),

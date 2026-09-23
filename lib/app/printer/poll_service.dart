@@ -81,10 +81,10 @@ class PollService {
         // Never silently: an acknowledgement that keeps failing is exactly what
         // makes the server re-offer a printed job forever.
         _markPrinted(serverId)
-            .catchError((e) => _emit('printed, but ack failed: $e'));
+            .catchError((e) => _emit('Tercetak, tapi gagal lapor ke server'));
       } else if (job.status == PrintJobStatus.failed) {
         _markFailed(serverId, job.lastError)
-            .catchError((e) => _emit('failed, but ack failed: $e'));
+            .catchError((e) => _emit('Gagal cetak, dan gagal lapor ke server'));
       }
     });
     // Poll once immediately, then on the interval — so the first receipt
@@ -110,11 +110,11 @@ class PollService {
     try {
       final jobs = await _fetchPendingJobs();
       if (jobs.isEmpty) {
-        _emit('idle');
+        _emit('Menunggu struk');
         return;
       }
 
-      _emit('printing ${jobs.length} receipt(s)');
+      _emit('Mencetak ${jobs.length} struk');
 
       for (final job in jobs) {
         final jobId = job['id'].toString();
@@ -152,7 +152,7 @@ class PollService {
     } catch (e) {
       // Network down, server error, auth expired, etc. Stay quiet and try
       // again next tick — transient failures are normal on a phone.
-      _emit('offline (will retry)');
+      _emit('Offline — mencoba lagi');
     } finally {
       _polling = false;
     }

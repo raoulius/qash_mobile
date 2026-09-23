@@ -108,7 +108,7 @@ class BluetoothPrinterService {
   /// are expected to call connect()/reconnectToLastKnown() first.
   Future<void> printBytes(Uint8List bytes) async {
     if (_connectedDevice == null) {
-      throw StateError('No printer connected');
+      throw StateError('Printer tidak terhubung');
     }
     if (Platform.isAndroid) {
       await _androidPrint(bytes);
@@ -217,7 +217,7 @@ class BluetoothPrinterService {
 
   Future<void> _androidPrint(Uint8List bytes) async {
     final ok = await _androidManager.send(type: PrinterType.bluetooth, bytes: bytes.toList());
-    if (!ok) throw StateError('Print failed: send() returned false');
+    if (!ok) throw StateError('Printer tidak merespons');
   }
 
   // ---- iOS implementation (ExternalAccessory / MFi Classic) -----------
@@ -244,7 +244,7 @@ class BluetoothPrinterService {
     return (result ?? [])
         .cast<Map<Object?, Object?>>()
         .map((m) => PrinterDeviceInfo(
-              name: m['name'] as String? ?? 'Unknown printer',
+              name: m['name'] as String? ?? 'Printer tanpa nama',
               address: m['address'] as String? ?? '',
             ))
         .toList();

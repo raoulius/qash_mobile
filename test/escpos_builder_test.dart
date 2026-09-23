@@ -154,4 +154,20 @@ void main() {
     expect(out, contains('41.800'));
     expect(_count(out, '\x1dV'), 1);
   });
+
+  test('the station test slip prints its fields on 58mm without a server job', () async {
+    final out = _text(await EscPosBuilder.buildFromJobPayload({
+      '_jobType': 'test_print',
+      'template': {'paperWidth': '58'},
+      'header': {'outletName': 'demo-cafe'},
+      'station': 'counter-1',
+      'printer': 'RPP02N',
+      'printedAt': '2026-09-23 19:40',
+    }));
+
+    expect(out, contains('TES CETAK'));
+    expect(out, contains('counter-1'));
+    expect(out, contains('RPP02N'));
+    expect(out, isNot(contains('STRUK')), reason: 'must not fall through to the receipt layout');
+  });
 }

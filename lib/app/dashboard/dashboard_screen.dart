@@ -61,9 +61,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     if (_error != null) {
       return ListView(
-        children: [
-          const SizedBox(height: 100),
-          Center(child: Text('Failed to load: $_error')),
+        children: const [
+          SizedBox(height: 100),
+          Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 24),
+              child: Text('Gagal memuat dashboard. Tarik ke bawah untuk mencoba lagi.',
+                  textAlign: TextAlign.center),
+            ),
+          ),
         ],
       );
     }
@@ -174,14 +180,14 @@ class _RevenueTrendCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Revenue Trend', style: Theme.of(context).textTheme.titleMedium),
-            Text('Paid and pay-after revenue by day',
+            Text('Tren Pendapatan', style: Theme.of(context).textTheme.titleMedium),
+            Text('Pendapatan lunas dan bayar-nanti per hari',
                 style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             const SizedBox(height: 16),
             SizedBox(
               height: 220,
               child: trend.series.isEmpty
-                  ? const Center(child: Text('No data'))
+                  ? const Center(child: Text('Belum ada data'))
                   : LineChart(
                       LineChartData(
                         minY: 0,
@@ -262,14 +268,14 @@ class _OrderBreakdownCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Order Breakdown', style: Theme.of(context).textTheme.titleMedium),
-            Text('Completed, pending, and cancelled payments',
+            Text('Rincian Pesanan', style: Theme.of(context).textTheme.titleMedium),
+            Text('Pembayaran selesai, tertunda, dan batal',
                 style: TextStyle(color: scheme.onSurfaceVariant)),
             const SizedBox(height: 16),
             SizedBox(
               height: 180,
               child: total == 0
-                  ? const Center(child: Text('No data'))
+                  ? const Center(child: Text('Belum ada data'))
                   : PieChart(
                       PieChartData(
                         centerSpaceRadius: 50,
@@ -301,9 +307,9 @@ class _OrderBreakdownCard extends StatelessWidget {
                     ),
             ),
             const SizedBox(height: 16),
-            _legendRow(context, 'Completed', completedColor, breakdown.completed),
-            _legendRow(context, 'Pending', pendingColor, breakdown.pending),
-            _legendRow(context, 'Cancelled', cancelledColor, breakdown.cancelled),
+            _legendRow(context, 'Selesai', completedColor, breakdown.completed),
+            _legendRow(context, 'Tertunda', pendingColor, breakdown.pending),
+            _legendRow(context, 'Batal', cancelledColor, breakdown.cancelled),
           ],
         ),
       ),

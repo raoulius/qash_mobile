@@ -17,6 +17,7 @@
 import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class BluetoothPermissionResult {
   final bool granted;
@@ -46,6 +47,18 @@ class BluetoothPermissions {
       false,
       'Platform ini tidak mendukung printer Bluetooth',
     );
+  }
+
+  /// Xiaomi/Oppo/Vivo battery managers kill even a foreground service, which
+  /// silently stops the poll loop. Asks once per install; the answer is the
+  /// cashier's (or owner's) to give, so a refusal is never re-prompted.
+  static Future<void> askBatteryExemptionOnce() async {
+    if (!Platform.isAndroid) return;
+    const key = 'station.batteryExemptionAsked';
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(key) ?? false) return;
+    await prefs.setBool(key, true);
+    await Permission.ignoreBatteryOptimizations.request();
   }
 
   /// Checks without prompting — for re-checking when the cashier comes back
