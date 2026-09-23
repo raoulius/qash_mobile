@@ -22,6 +22,8 @@ dependencies:
   http: ^1.2.0
 
   esc_pos_utils: ^1.1.0
+  # Logo decode/resize for the receipt header (same major esc_pos_utils pins).
+  image: ^3.3.0
   # Runtime permission requests (Android 12+ BLUETOOTH_SCAN/CONNECT,
   # legacy ACCESS_FINE_LOCATION on older Android).
   permission_handler: ^11.3.0

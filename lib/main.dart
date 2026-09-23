@@ -16,6 +16,8 @@ import 'app/printer/poll_service.dart';
 import 'app/printer/reverb_service.dart';
 import 'app/printer/print_notifications.dart';
 import 'app/printer/printing_overlay.dart';
+import 'app/printer/failed_jobs_screen.dart';
+import 'app/station_native.dart';
 import 'app/permissions/permissions.dart';
 import 'app/dashboard/dashboard_stats_service.dart';
 import 'app/dashboard/dashboard_screen.dart';
@@ -106,7 +108,9 @@ class _StationScreenState extends State<StationScreen> {
   int _navIndex = 0;
 
   PrintingOverlayState _overlayState = PrintingOverlayState.hidden;
+  final _overlayTracker = PrintingOverlayTracker();
   Timer? _overlayHideTimer;
+  Timer? _reconnectTimer;
 
   @override
   void initState() {
@@ -141,6 +145,13 @@ class _StationScreenState extends State<StationScreen> {
     _printerService.connectionState.listen((s) {
       setState(() => _printerStatus = s.name);
     });
+    // Printer dropped (powered off, out of range): retry the last-known
+    // device every 30s so the cashier doesn't have to notice and tap.
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_printerService.currentState == PrinterConnectionState.disconnected) {
+        _printerService.reconnectToLastKnown();
+      }
+    });
     _pollService.status.listen((s) {
       setState(() => _pollStatus = s);
     });
@@ -161,6 +172,10 @@ class _StationScreenState extends State<StationScreen> {
 
     await _printQueue.pruneCompleted();
 
+    // Keep the screen on and hold a foreground service so polling survives
+    // the cashier switching apps or the screen timing out.
+    StationNative.start('${widget.config.stationId} — ${widget.config.tenantId}');
+
     // Start network services immediately — don't block on Bluetooth.
     _pollService.start();
     _reverbService.start();
@@ -174,19 +189,18 @@ class _StationScreenState extends State<StationScreen> {
   }
 
   void _onJobUpdate(PrintJob job) {
+    if (job.status == PrintJobStatus.success) {
+      PrintNotifications.notifyPrinted(job.id);
+    }
+
+    final next = _overlayTracker.onJob(job.id, job.status);
+    if (next != _overlayState) setState(() => _overlayState = next);
+
     _overlayHideTimer?.cancel();
-    switch (job.status) {
-      case PrintJobStatus.printing:
-        setState(() => _overlayState = PrintingOverlayState.printing);
-      case PrintJobStatus.success:
-        setState(() => _overlayState = PrintingOverlayState.success);
-        PrintNotifications.notifyPrinted(job.id);
-        _overlayHideTimer = Timer(const Duration(milliseconds: 900), () {
-          if (mounted) setState(() => _overlayState = PrintingOverlayState.hidden);
-        });
-      case PrintJobStatus.queued:
-      case PrintJobStatus.failed:
-        setState(() => _overlayState = PrintingOverlayState.hidden);
+    if (next == PrintingOverlayState.success) {
+      _overlayHideTimer = Timer(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => _overlayState = PrintingOverlayState.hidden);
+      });
     }
   }
 
@@ -217,6 +231,7 @@ class _StationScreenState extends State<StationScreen> {
 
   Future<void> _resetDevice() async {
     await ConfigService.clear();
+    await StationNative.stop();
     if (!mounted) return;
     Navigator.pushReplacement(
       context,
@@ -227,6 +242,7 @@ class _StationScreenState extends State<StationScreen> {
   @override
   void dispose() {
     _overlayHideTimer?.cancel();
+    _reconnectTimer?.cancel();
     _reverbService.dispose();
     _pollService.dispose();
     _printQueue.dispose();
@@ -243,6 +259,7 @@ class _StationScreenState extends State<StationScreen> {
             index: _navIndex,
             children: [
               _buildStationTab(context),
+              FailedJobsScreen(printQueue: _printQueue),
               DashboardScreen(statsService: _dashboardStatsService),
             ],
           ),
@@ -254,6 +271,7 @@ class _StationScreenState extends State<StationScreen> {
         onDestinationSelected: (i) => setState(() => _navIndex = i),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.print), label: 'Station'),
+          NavigationDestination(icon: Icon(Icons.error_outline), label: 'Gagal'),
           NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
         ],
       ),

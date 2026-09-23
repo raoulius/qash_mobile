@@ -83,12 +83,33 @@ class PrintQueue {
   /// Enqueues a receipt for printing and immediately attempts to process
   /// the queue. Returns the job id so the caller (the bridge) can report
   /// it back across to Svelte for correlation.
-  Future<String> enqueue(Map<String, dynamic> receiptJson) async {
+  /// [force] bypasses the server-job guard below — it is what makes a manual
+  /// reprint of an already-printed slip possible.
+  Future<String> enqueue(Map<String, dynamic> receiptJson, {bool force = false}) async {
+    final jobs = await _loadJobs();
+
+    // One server job prints once, whatever the server later says. The poll
+    // re-offers a job every time its lease expires, and an acknowledgement that
+    // fails to land leaves it pending forever — that combination printed the
+    // same kitchen ticket nine times, 32 seconds apart. Treating an existing
+    // non-failed copy as "already handled" makes the device idempotent per
+    // server job id, so a broken acknowledgement costs a stale row on the
+    // server instead of an endless stack of paper.
+    final serverId = receiptJson['_serverJobId']?.toString();
+    if (!force && serverId != null) {
+      for (final j in jobs) {
+        if (j.receiptJson['_serverJobId']?.toString() == serverId &&
+            j.status != PrintJobStatus.failed) {
+          unawaited(_processQueue());
+          return j.id;
+        }
+      }
+    }
+
     final job = PrintJob(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       receiptJson: receiptJson,
     );
-    final jobs = await _loadJobs();
     jobs.add(job);
     await _saveJobs(jobs);
     _jobUpdates.add(job);
@@ -104,16 +125,38 @@ class PrintQueue {
     final jobs = await _loadJobs();
     final existing = jobs.firstWhere((j) => j.id == jobId,
         orElse: () => throw ArgumentError('Unknown job id: $jobId'));
-    await enqueue(existing.receiptJson);
+    await enqueue(existing.receiptJson, force: true);
+  }
+
+  /// Current status of a stored job, or null if it is gone. Lets the poll tell
+  /// "queued, wait for it" from "already printed, just re-acknowledge it".
+  Future<PrintJobStatus?> statusOf(String jobId) async {
+    for (final j in await _loadJobs()) {
+      if (j.id == jobId) return j.status;
+    }
+    return null;
   }
 
   Future<void> _processQueue() async {
     if (_processing) return; // avoid concurrent drains
     _processing = true;
     try {
-      var jobs = await _loadJobs();
-      for (final job in jobs.where((j) => j.status == PrintJobStatus.queued)) {
-        await _attemptJob(job);
+      // Re-read after each pass: an enqueue that arrives mid-drain hits the
+      // guard above and is dropped, so a single pass leaves it sitting in the
+      // queue until something else happens to trigger a drain. `attempted`
+      // keeps each job to one try per drain, leaving the backoff timers in
+      // _attemptJob to own retries.
+      final attempted = <String>{};
+      while (true) {
+        final jobs = await _loadJobs();
+        final due = jobs
+            .where((j) => j.status == PrintJobStatus.queued && !attempted.contains(j.id))
+            .toList();
+        if (due.isEmpty) break;
+        for (final job in due) {
+          attempted.add(job.id);
+          await _attemptJob(job);
+        }
       }
     } finally {
       _processing = false;
@@ -185,19 +228,54 @@ class PrintQueue {
     await prefs.setString(_prefsKey, jsonEncode(jobs.map((j) => j.toJson()).toList()));
   }
 
-  /// Clears completed/failed jobs older than this session — call
-  /// periodically (e.g. on app start) so the persisted queue doesn't grow
-  /// unbounded. Keeps failed jobs around long enough for a manual reprint.
-  Future<void> pruneCompleted({int keepFailedCount = 20}) async {
+  /// Failed jobs, newest first — the Gagal tab's data source.
+  Future<List<PrintJob>> failedJobs() async {
     final jobs = await _loadJobs();
+    return jobs.where((j) => j.status == PrintJobStatus.failed).toList().reversed.toList();
+  }
+
+  /// Call on app start. Drops successes, keeps the last [keepFailedCount]
+  /// failures for a manual reprint, and keeps only *recent* unfinished work.
+  ///
+  /// Unfinished jobs older than [maxAge] are dropped: a shift that ended with a
+  /// dead printer must not flush yesterday's backlog the next morning, and the
+  /// server still has those jobs pending, so nothing is lost — a poll
+  /// re-delivers anything that genuinely still needs printing. Jobs stuck in
+  /// `printing` (app killed mid-print) are reset to `queued`, since nothing
+  /// else ever retries that state.
+  Future<void> pruneCompleted({
+    int keepFailedCount = 20,
+    Duration maxAge = const Duration(hours: 2),
+  }) async {
+    final jobs = await _loadJobs();
+
     final failed = jobs.where((j) => j.status == PrintJobStatus.failed).toList();
     final trimmedFailed = failed.length > keepFailedCount
         ? failed.sublist(failed.length - keepFailedCount)
         : failed;
-    final stillQueued = jobs
-        .where((j) => j.status == PrintJobStatus.queued || j.status == PrintJobStatus.printing)
+
+    final unfinished = jobs
+        .where((j) =>
+            (j.status == PrintJobStatus.queued || j.status == PrintJobStatus.printing) &&
+            _age(j) < maxAge)
+        .map((j) => j..status = PrintJobStatus.queued)
         .toList();
-    await _saveJobs([...stillQueued, ...trimmedFailed]);
+
+    // Recent successes are kept, not dropped: they are what [enqueue] checks to
+    // refuse printing a server job twice, so throwing them away on every launch
+    // would reopen that hole for anything still pending on the server.
+    final recentlyPrinted = jobs
+        .where((j) => j.status == PrintJobStatus.success && _age(j) < maxAge)
+        .toList();
+
+    await _saveJobs([...unfinished, ...recentlyPrinted, ...trimmedFailed]);
+  }
+
+  /// Ids are microsecond timestamps (see [enqueue]), so they double as a clock.
+  static Duration _age(PrintJob job) {
+    final us = int.tryParse(job.id);
+    if (us == null) return Duration.zero;
+    return DateTime.now().difference(DateTime.fromMicrosecondsSinceEpoch(us));
   }
 
   void dispose() {

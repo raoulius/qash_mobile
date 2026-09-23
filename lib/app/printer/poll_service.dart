@@ -50,6 +50,7 @@ class PollService {
   final Duration pollInterval;
 
   Timer? _timer;
+  StreamSubscription<PrintJob>? _jobSub;
   bool _polling = false; // guards against overlapping polls if one is slow
 
   final _statusController = StreamController<String>.broadcast();
@@ -70,6 +71,22 @@ class PollService {
 
   void start() {
     _timer?.cancel();
+    // Every terminal state — including a reprint of an old failure from the
+    // Gagal tab — is reported to Laravel from here, so the server's view of a
+    // job tracks what actually came out of the printer.
+    _jobSub ??= printQueue.jobUpdates.listen((job) {
+      final serverId = job.receiptJson['_serverJobId']?.toString();
+      if (serverId == null) return;
+      if (job.status == PrintJobStatus.success) {
+        // Never silently: an acknowledgement that keeps failing is exactly what
+        // makes the server re-offer a printed job forever.
+        _markPrinted(serverId)
+            .catchError((e) => _statusController.add('printed, but ack failed: $e'));
+      } else if (job.status == PrintJobStatus.failed) {
+        _markFailed(serverId, job.lastError)
+            .catchError((e) => _statusController.add('failed, but ack failed: $e'));
+      }
+    });
     // Poll once immediately, then on the interval — so the first receipt
     // after launch doesn't wait a full interval.
     _poll();
@@ -104,20 +121,33 @@ class PollService {
         // Merge job_type so EscPosBuilder can dispatch to the right template
         final receiptJson = {
           '_jobType': job['job_type'] as String? ?? '',
+          '_serverJobId': jobId,
           ...job['payload'] as Map<String, dynamic>,
         };
 
         final localJobId = await printQueue.enqueue(receiptJson);
 
-        // Wait for this specific job to reach a terminal state so we only
-        // acknowledge to Laravel AFTER a real successful print.
-        final ok = await _awaitJobResult(localJobId);
-
-        if (ok) {
-          await _markPrinted(jobId);
+        // The queue refuses to print a server job it has already printed, so a
+        // re-offer means the acknowledgement is what went missing, not the
+        // print. Re-send it and move on instead of waiting on a job that will
+        // never emit another event.
+        // Also guards a race: a job can reach a terminal state before
+        // _awaitJobResult attaches its listener, and that listener is the only
+        // thing it waits on — so it would block for its full timeout and report
+        // nothing, which is how a printed job kept its pending row.
+        switch (await printQueue.statusOf(localJobId)) {
+          case PrintJobStatus.success:
+            await _markPrinted(jobId);
+            continue;
+          case PrintJobStatus.failed:
+            continue; // the jobUpdates listener already reported it
+          default:
+            break;
         }
-        // If it failed, we deliberately do NOT mark it printed — it stays
-        // pending in Laravel and will be retried on a future poll.
+
+        // Print jobs one at a time; the jobUpdates listener in start() does
+        // the mark-printed / mark-failed call for this job's terminal state.
+        await _awaitJobResult(localJobId);
       }
     } catch (e) {
       // Network down, server error, auth expired, etc. Stay quiet and try
@@ -159,6 +189,21 @@ class PollService {
     }
   }
 
+  /// POST /print-jobs/{id}/mark-failed
+  /// Called after the queue gives up (3 attempts). Without this the job stays
+  /// pending server-side and is re-fetched on every lease expiry forever.
+  /// Reprint later from the Gagal tab; a success there marks it printed.
+  Future<void> _markFailed(String jobId, String? error) async {
+    final uri = Uri.parse('$apiBaseUrl/print-jobs/$jobId/mark-failed');
+    final req = http.Request('POST', uri)
+      ..headers.addAll(_headers)
+      ..body = jsonEncode({'error': error ?? 'print failed'});
+    final res = await sendNoRedirect(req).timeout(const Duration(seconds: 10));
+    if (res.statusCode != 200) {
+      throw HttpException('mark-failed failed: ${res.statusCode}');
+    }
+  }
+
   /// Listens to PrintQueue.jobUpdates until the given local job reaches a
   /// terminal state (success or failed), returning true on success.
   Future<bool> _awaitJobResult(String localJobId) {
@@ -189,6 +234,7 @@ class PollService {
 
   void dispose() {
     stop();
+    _jobSub?.cancel();
     _statusController.close();
   }
 }

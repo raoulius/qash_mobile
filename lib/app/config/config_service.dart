@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../net.dart';
@@ -36,7 +38,11 @@ class ConfigService {
     final uri = Uri.parse('$centralUrl/api/device/activate');
     final req = http.Request('POST', uri)
       ..headers.addAll({'Accept': 'application/json', 'Content-Type': 'application/json'})
-      ..body = jsonEncode({'activation_token': token.trim().toUpperCase()});
+      ..body = jsonEncode({
+        'activation_token': token.trim().toUpperCase(),
+        // Shown on the backoffice Print Stations page next to the station.
+        'device_name': await _deviceName(),
+      });
     final res = await sendNoRedirect(req).timeout(const Duration(seconds: 15));
 
     if (res.statusCode != 200) {
@@ -59,6 +65,17 @@ class ConfigService {
     );
     await save(config);
     return config;
+  }
+
+  static Future<String?> _deviceName() async {
+    try {
+      if (Platform.isAndroid) {
+        final a = await DeviceInfoPlugin().androidInfo;
+        return '${a.manufacturer} ${a.model}'.trim();
+      }
+      if (Platform.isIOS) return (await DeviceInfoPlugin().iosInfo).name;
+    } catch (_) {}
+    return null;
   }
 
   static DeviceConfig _fromMap(Map<String, dynamic> m) => DeviceConfig(

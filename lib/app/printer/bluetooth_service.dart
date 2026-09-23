@@ -147,6 +147,7 @@ class BluetoothPrinterService {
   }
 
   void dispose() {
+    _btStateSub?.cancel();
     _stateController.close();
   }
 
@@ -155,6 +156,20 @@ class BluetoothPrinterService {
   // false is what selects Classic over BLE.
 
   final _androidManager = PrinterManager.instance;
+  StreamSubscription<BTStatus>? _btStateSub;
+
+  BluetoothPrinterService() {
+    if (Platform.isAndroid) {
+      // The plugin reports the socket dropping (printer off / out of range);
+      // without this the UI says "connected" until the next job fails.
+      _btStateSub = _androidManager.stateBluetooth.listen((status) {
+        if (status == BTStatus.none && _connectedDevice != null) {
+          _connectedDevice = null;
+          _setState(PrinterConnectionState.disconnected);
+        }
+      });
+    }
+  }
 
   Future<List<PrinterDeviceInfo>> _androidScan(Duration timeout) async {
     final found = <PrinterDeviceInfo>[];
@@ -164,7 +179,7 @@ class BluetoothPrinterService {
         .discovery(type: PrinterType.bluetooth, isBle: false)
         .listen((device) {
       found.add(PrinterDeviceInfo(
-        name: device.name ?? 'Unknown printer',
+        name: device.name,
         address: device.address ?? '',
       ));
     });

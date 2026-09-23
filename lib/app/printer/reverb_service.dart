@@ -181,6 +181,7 @@ class ReverbService {
     // poll_service owns mark-printed; we just fast-path enqueue here.
     return await printQueue.enqueue({
       '_jobType': data['job_type'] as String? ?? '',
+      if (data['id'] != null) '_serverJobId': data['id'].toString(),
       ...payload,
     });
   }
