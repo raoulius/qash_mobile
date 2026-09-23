@@ -36,7 +36,8 @@ class StationService : Service() {
         val notification = Notification.Builder(this, CHANNEL)
             .setContentTitle("Print station aktif")
             .setContentText(intent?.getStringExtra(EXTRA_TEXT) ?: "Menunggu struk…")
-            .setSmallIcon(android.R.drawable.ic_menu_send)
+            .setSmallIcon(R.drawable.ic_stat_qash)
+            .setColor(0xFFFF8343.toInt()) // logo orange
             .setContentIntent(open)
             .setOngoing(true)
             .build()

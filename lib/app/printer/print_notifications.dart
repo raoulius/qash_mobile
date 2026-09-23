@@ -4,6 +4,7 @@
 // Separate from the in-app printing overlay (printing_overlay.dart) — this
 // one should land even if the cashier has swiped the app to the background.
 
+import 'dart:ui' show Color;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -15,12 +16,13 @@ class PrintNotifications {
     channelDescription: 'Notifies when a receipt finishes printing',
     importance: Importance.low,
     priority: Priority.low,
+    color: Color(0xFFFF8343), // logo orange
   );
 
   static Future<void> init() async {
     await _plugin.initialize(
       settings: const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        android: AndroidInitializationSettings('ic_stat_qash'),
         iOS: DarwinInitializationSettings(),
       ),
     );

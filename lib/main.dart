@@ -36,7 +36,7 @@ class PrintStationApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Print Station',
+      title: 'Qash Mobile',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
@@ -375,7 +375,17 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
     final cfg = widget.config;
     return Scaffold(
       appBar: AppBar(
-        title: Text('${cfg.stationId} — ${cfg.tenantId}'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Image.asset(AppTheme.logo(context, 'logotype'), height: 24),
+            Text(
+              '${cfg.stationId} — ${cfg.tenantId}',
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
         actions: [
           PopupMenuButton<String>(
             onSelected: (v) { if (v == 'reset') _resetDevice(); },

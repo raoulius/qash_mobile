@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme.dart';
 import 'config_service.dart';
 import 'device_config.dart';
 
@@ -55,7 +56,7 @@ class _SetupScreenState extends State<SetupScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.print, size: 64),
+                  Image.asset(AppTheme.logo(context, 'main_logo'), height: 120),
                   const SizedBox(height: 24),
                   Text(
                     'Print Station Setup',

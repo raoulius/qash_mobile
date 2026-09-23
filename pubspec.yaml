@@ -41,6 +41,44 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
-
 flutter:
   uses-material-design: true
+  assets:
+    - assets/brand/main_logo_navy.png
+    - assets/brand/main_logo_white.png
+    - assets/brand/logotype_navy.png
+    - assets/brand/logotype_white.png
+
+# Launcher icons and splash are generated into android/ and ios/ (committed).
+# The generators are NOT kept as dev_dependencies: esc_pos_utils pins image 3,
+# which caps them at flutter_launcher_icons 0.11 / flutter_native_splash
+# 2.2.16, and that splash version ships an Android plugin without a namespace
+# that breaks the Gradle build. To regenerate after a logo change:
+#   flutter pub add --dev flutter_launcher_icons flutter_native_splash
+#   dart run flutter_launcher_icons && dart run flutter_native_splash:create
+#   flutter pub remove flutter_launcher_icons flutter_native_splash
+# then revert ios/Runner.xcodeproj/project.pbxproj and ios/Runner/Info.plist
+# (0.11 mangles the pbxproj; the splash tool only reformats the plist) and
+# re-add <monochrome> to mipmap-anydpi-v26/ic_launcher.xml.
+# Sources in assets/brand/ were padded from the brand PNGs (Qash Assets/Qash
+# Logos) — logo orange is #FF8343, navy #142566.
+flutter_icons: # flutter_launcher_icons 0.11 config key
+  android: true
+  ios: true
+  image_path: assets/brand/icon_ios.png
+  min_sdk_android: 21
+  adaptive_icon_background: "#FF8343"
+  adaptive_icon_foreground: assets/brand/icon_foreground.png
+  remove_alpha_ios: true
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/brand/splash_logo.png
+  color_dark: "#142566"
+  image_dark: assets/brand/splash_logo_dark.png
+  android_12:
+    color: "#FFFFFF"
+    image: assets/brand/splash_android12.png
+    color_dark: "#142566"
+    image_dark: assets/brand/splash_android12_dark.png
+  web: false

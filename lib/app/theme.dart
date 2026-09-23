@@ -11,6 +11,11 @@ class AppTheme {
   static const _brandOrange = Color(0xFFF97316); // --mainColorOrange
   static const _brandNavy = Color(0xFF142566); // --mainColorBlue
 
+  /// Brand logo for the current brightness: [kind] is 'main_logo' (mark +
+  /// wordmark, stacked) or 'logotype' (wordmark). Files in assets/brand/.
+  static String logo(BuildContext context, String kind) =>
+      'assets/brand/${kind}_${Theme.of(context).brightness == Brightness.dark ? 'white' : 'navy'}.png';
+
   static ThemeData light() => _build(Brightness.light);
   static ThemeData dark() => _build(Brightness.dark);
 
