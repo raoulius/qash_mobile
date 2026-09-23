@@ -45,6 +45,8 @@ class StationService : Service() {
         } else {
             startForeground(ID, notification)
         }
-        return START_STICKY
+        // Not STICKY: a restart after the process dies would bring back only this
+        // notification, with no Flutter engine polling behind it.
+        return START_NOT_STICKY
     }
 }

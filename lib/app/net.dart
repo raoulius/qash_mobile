@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:http/http.dart' as http;
 
 /// The central Qash domain every device activates against. Override per
@@ -14,5 +15,14 @@ const centralUrl = String.fromEnvironment('CENTRAL_URL', defaultValue: 'https://
 /// error. Fail loudly instead: callers already treat non-200 as an error.
 Future<http.Response> sendNoRedirect(http.BaseRequest req) async {
   req.followRedirects = false;
-  return http.Response.fromStream(await req.send());
+  final res = await http.Response.fromStream(await req.send());
+  if (res.statusCode == 401 && req.headers.containsKey('Authorization')) {
+    deviceUnauthorized.add(null);
+  }
+  return res;
 }
+
+/// Fires when the server rejects this device's token: revoked in the
+/// backoffice, or the station was re-activated on another phone. Without it
+/// every caller just saw "offline, will retry" forever. StationScreen listens.
+final deviceUnauthorized = StreamController<void>.broadcast();

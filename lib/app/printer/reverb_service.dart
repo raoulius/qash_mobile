@@ -97,11 +97,11 @@ class ReverbService {
       final uri =
           '$scheme://$reverbHost:$reverbPort/app/$appKey?protocol=7&client=flutter&version=1.0&flash=false';
 
-      // ignore: avoid_print
-      print('[Reverb] connecting to $uri');
       _socket = await WebSocket.connect(uri);
-      // ignore: avoid_print
-      print('[Reverb] socket connected');
+      if (_disposed) {
+        await _socket!.close(); // reset while connecting
+        return;
+      }
       _emit('connected');
 
       _socket!.listen(
@@ -111,16 +111,12 @@ class ReverbService {
         cancelOnError: true,
       );
     } catch (e) {
-      // ignore: avoid_print
-      print('[Reverb] connect failed: $e');
       _emit('ws error: $e');
       _scheduleReconnect();
     }
   }
 
   void _onMessage(dynamic raw) {
-    // ignore: avoid_print
-    print('[Reverb] message: $raw');
     if (raw is! String) return;
     final Map<String, dynamic> msg;
     try {
@@ -155,8 +151,6 @@ class ReverbService {
       });
       _emit('subscribed');
     } catch (e) {
-      // ignore: avoid_print
-      print('[Reverb] auth exception: $e');
       _emit('channel auth failed');
       // Close socket so the reconnect loop retries with a fresh connection
       _socket?.close();
@@ -188,8 +182,6 @@ class ReverbService {
 
   Future<String> _fetchChannelAuth(String socketId) async {
     final uri = Uri.parse('$apiBaseUrl/broadcasting/auth');
-    // ignore: avoid_print
-    print('[Reverb] auth POST to $uri  socket=$socketId  channel=$_channelName');
     final req = http.Request('POST', uri)
       ..headers.addAll({
         'Authorization': 'Bearer $apiToken',
@@ -201,8 +193,6 @@ class ReverbService {
       };
     final res = await sendNoRedirect(req).timeout(const Duration(seconds: 10));
 
-    // ignore: avoid_print
-    print('[Reverb] auth response ${res.statusCode}: ${res.body}');
     if (res.statusCode != 200) {
       throw Exception('broadcasting auth failed: ${res.statusCode}');
     }
@@ -231,7 +221,9 @@ class ReverbService {
     _reconnectTimer = Timer(const Duration(seconds: 5), _connect);
   }
 
-  void _emit(String s) => _statusController.add(s);
+  void _emit(String s) {
+    if (!_disposed) _statusController.add(s);
+  }
 
   void dispose() {
     _disposed = true;

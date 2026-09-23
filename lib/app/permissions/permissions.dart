@@ -44,25 +44,34 @@ class BluetoothPermissions {
     // Other platforms (web, desktop) aren't part of this app's target set.
     return const BluetoothPermissionResult(
       false,
-      'Unsupported platform for Bluetooth printing',
+      'Platform ini tidak mendukung printer Bluetooth',
     );
   }
 
-  static Future<BluetoothPermissionResult> _ensureAndroidGranted() async {
-    final sdkInt = await _androidSdkInt();
-
-    final List<Permission> required;
-    if (sdkInt >= 31) {
-      // Android 12+: explicit scan/connect permissions.
-      required = [Permission.bluetoothScan, Permission.bluetoothConnect];
-    } else {
-      // Android < 12: scanning needs location; legacy bluetooth/bluetoothAdmin
-      // are install-time (manifest-only) on these versions, no runtime prompt
-      // needed for them.
-      required = [Permission.locationWhenInUse];
+  /// Checks without prompting — for re-checking when the cashier comes back
+  /// from system Settings (the prompt itself pauses/resumes the app, so
+  /// prompting on resume would loop).
+  static Future<bool> isGranted() async {
+    if (!Platform.isAndroid) return Platform.isIOS;
+    for (final p in await _androidRequired()) {
+      if (!await p.isGranted) return false;
     }
+    return true;
+  }
 
-    final statuses = await required.request();
+  static Future<List<Permission>> _androidRequired() async {
+    if (await _androidSdkInt() >= 31) {
+      // Android 12+: explicit scan/connect permissions.
+      return [Permission.bluetoothScan, Permission.bluetoothConnect];
+    }
+    // Android < 12: scanning needs location; legacy bluetooth/bluetoothAdmin
+    // are install-time (manifest-only) on these versions, no runtime prompt
+    // needed for them.
+    return [Permission.locationWhenInUse];
+  }
+
+  static Future<BluetoothPermissionResult> _ensureAndroidGranted() async {
+    final statuses = await (await _androidRequired()).request();
 
     final allGranted = statuses.values.every((s) => s.isGranted);
     if (allGranted) return const BluetoothPermissionResult(true);
@@ -73,9 +82,8 @@ class BluetoothPermissions {
     return BluetoothPermissionResult(
       false,
       anyPermanentlyDenied
-          ? 'Bluetooth permission was denied permanently. '
-              'Enable it from system Settings to use the printer.'
-          : 'Bluetooth permission is required to scan for the printer.',
+          ? 'Izin Bluetooth ditolak. Aktifkan di Pengaturan agar printer bisa dipakai.'
+          : 'Izin Bluetooth diperlukan untuk mencari printer.',
     );
   }
 

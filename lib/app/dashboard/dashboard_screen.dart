@@ -36,11 +36,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
     try {
       final json = await widget.statsService.fetch();
-      setState(() => _stats = DashboardStats.fromJson(json));
+      if (mounted) setState(() => _stats = DashboardStats.fromJson(json));
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = e.toString());
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 

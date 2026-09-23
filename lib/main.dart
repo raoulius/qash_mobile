@@ -6,6 +6,8 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart' show openAppSettings;
+import 'app/net.dart';
 import 'app/theme.dart';
 import 'app/config/config_service.dart';
 import 'app/config/device_config.dart';
@@ -95,7 +97,7 @@ class StationScreen extends StatefulWidget {
   State<StationScreen> createState() => _StationScreenState();
 }
 
-class _StationScreenState extends State<StationScreen> {
+class _StationScreenState extends State<StationScreen> with WidgetsBindingObserver {
   late final BluetoothPrinterService _printerService;
   late final PrintQueue _printQueue;
   late final PollService _pollService;
@@ -111,6 +113,14 @@ class _StationScreenState extends State<StationScreen> {
   final _overlayTracker = PrintingOverlayTracker();
   Timer? _overlayHideTimer;
   Timer? _reconnectTimer;
+  StreamSubscription<void>? _unauthorizedSub;
+
+  /// Server rejected our token (revoked, or re-activated on another phone).
+  bool _revoked = false;
+
+  /// Bluetooth permission refused; retried when the cashier returns from Settings.
+  bool _permissionDenied = false;
+  bool _started = false;
 
   @override
   void initState() {
@@ -159,17 +169,28 @@ class _StationScreenState extends State<StationScreen> {
       setState(() => _pushStatus = s);
     });
     _printQueue.jobUpdates.listen(_onJobUpdate);
+    _unauthorizedSub = deviceUnauthorized.stream.listen((_) {
+      if (_revoked || !mounted) return;
+      _pollService.stop();
+      _reverbService.dispose();
+      setState(() => _revoked = true);
+    });
+    WidgetsBinding.instance.addObserver(this);
 
     _bootstrap();
   }
 
   Future<void> _bootstrap() async {
     final perm = await BluetoothPermissions.ensureGranted();
+    if (!mounted) return;
+    setState(() => _permissionDenied = !perm.granted);
     if (!perm.granted) {
-      setState(() => _printerStatus = 'permission denied: ${perm.reason}');
+      setState(() => _printerStatus = perm.reason ?? 'Izin Bluetooth ditolak');
       return;
     }
 
+    if (_started) return; // two quick resumes can both re-run bootstrap
+    _started = true;
     await _printQueue.pruneCompleted();
 
     // Keep the screen on and hold a foreground service so polling survives
@@ -185,6 +206,15 @@ class _StationScreenState extends State<StationScreen> {
       if (!reconnected && mounted) {
         setState(() => _printerStatus = 'no printer — tap to connect');
       }
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back from system Settings: services never started, so start them now.
+    if (state != AppLifecycleState.resumed || !_permissionDenied) return;
+    BluetoothPermissions.isGranted().then((ok) {
+      if (ok && _permissionDenied) _bootstrap();
     });
   }
 
@@ -224,12 +254,36 @@ class _StationScreenState extends State<StationScreen> {
             .toList(),
       ),
     );
-    if (chosen != null) {
+    if (chosen == null) return;
+    try {
       await _printerService.connect(chosen);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal terhubung ke ${chosen.name}. Pastikan printer menyala.')),
+      );
     }
   }
 
-  Future<void> _resetDevice() async {
+  Future<void> _resetDevice({bool confirm = true}) async {
+    if (confirm) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Reset perangkat?'),
+          content: const Text(
+              'Station ini akan berhenti mencetak sampai diaktifkan lagi '
+              'dengan token baru dari backoffice.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Reset')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    // Old jobs belong to the old station token; don't replay them under a new one.
+    await _printQueue.clear();
     await ConfigService.clear();
     await StationNative.stop();
     if (!mounted) return;
@@ -241,6 +295,8 @@ class _StationScreenState extends State<StationScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _unauthorizedSub?.cancel();
     _overlayHideTimer?.cancel();
     _reconnectTimer?.cancel();
     _reverbService.dispose();
@@ -252,6 +308,7 @@ class _StationScreenState extends State<StationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_revoked) return _buildRevoked(context);
     return Scaffold(
       body: Stack(
         children: [
@@ -274,6 +331,42 @@ class _StationScreenState extends State<StationScreen> {
           NavigationDestination(icon: Icon(Icons.error_outline), label: 'Gagal'),
           NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
         ],
+      ),
+    );
+  }
+
+  Widget _buildRevoked(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.link_off, size: 64, color: theme.colorScheme.error),
+                const SizedBox(height: 24),
+                Text('Perangkat dinonaktifkan',
+                    style: theme.textTheme.headlineSmall, textAlign: TextAlign.center),
+                const SizedBox(height: 8),
+                Text(
+                  'Server menolak token station ini — dicabut di backoffice atau '
+                  'sudah diaktifkan di HP lain. Minta token baru ke admin.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: () => _resetDevice(confirm: false),
+                  child: const Text('Aktivasi ulang'),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -326,6 +419,14 @@ class _StationScreenState extends State<StationScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
+                if (_permissionDenied) ...[
+                  OutlinedButton.icon(
+                    onPressed: openAppSettings,
+                    icon: const Icon(Icons.settings),
+                    label: const Text('Buka Pengaturan'),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 FilledButton.icon(
                   onPressed: _pickPrinter,
                   icon: const Icon(Icons.bluetooth_searching),

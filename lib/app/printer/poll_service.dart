@@ -81,10 +81,10 @@ class PollService {
         // Never silently: an acknowledgement that keeps failing is exactly what
         // makes the server re-offer a printed job forever.
         _markPrinted(serverId)
-            .catchError((e) => _statusController.add('printed, but ack failed: $e'));
+            .catchError((e) => _emit('printed, but ack failed: $e'));
       } else if (job.status == PrintJobStatus.failed) {
         _markFailed(serverId, job.lastError)
-            .catchError((e) => _statusController.add('failed, but ack failed: $e'));
+            .catchError((e) => _emit('failed, but ack failed: $e'));
       }
     });
     // Poll once immediately, then on the interval — so the first receipt
@@ -110,11 +110,11 @@ class PollService {
     try {
       final jobs = await _fetchPendingJobs();
       if (jobs.isEmpty) {
-        _statusController.add('idle');
+        _emit('idle');
         return;
       }
 
-      _statusController.add('printing ${jobs.length} receipt(s)');
+      _emit('printing ${jobs.length} receipt(s)');
 
       for (final job in jobs) {
         final jobId = job['id'].toString();
@@ -152,7 +152,7 @@ class PollService {
     } catch (e) {
       // Network down, server error, auth expired, etc. Stay quiet and try
       // again next tick — transient failures are normal on a phone.
-      _statusController.add('offline (will retry)');
+      _emit('offline (will retry)');
     } finally {
       _polling = false;
     }
@@ -232,7 +232,16 @@ class PollService {
     return completer.future;
   }
 
+  bool _disposed = false;
+
+  /// A poll still in flight when the station is reset must not write to the
+  /// closed controller.
+  void _emit(String s) {
+    if (!_disposed) _statusController.add(s);
+  }
+
   void dispose() {
+    _disposed = true;
     stop();
     _jobSub?.cancel();
     _statusController.close();

@@ -1,6 +1,7 @@
 // print_queue.dart
 //
-// Sits between printer_bridge.dart and bluetooth_service.dart. Exists to
+// Sits between the job sources (poll_service.dart, reverb_service.dart) and
+// bluetooth_service.dart. Exists to
 // answer one question reliably: "what happens if the printer is briefly
 // disconnected, out of range, or the app gets killed mid-print?"
 //
@@ -71,9 +72,8 @@ class PrintQueue {
   final BluetoothPrinterService printerService;
   final _jobUpdates = StreamController<PrintJob>.broadcast();
 
-  /// Emits every time a job's status changes — the bridge listens to this
-  /// to relay status back to the Svelte UI (e.g. "printing...", "done",
-  /// "failed, tap to retry").
+  /// Emits every time a job's status changes — the station screen, the Gagal
+  /// tab and PollService (server acknowledgements) listen to this.
   Stream<PrintJob> get jobUpdates => _jobUpdates.stream;
 
   bool _processing = false;
@@ -81,8 +81,7 @@ class PrintQueue {
   PrintQueue({required this.printerService});
 
   /// Enqueues a receipt for printing and immediately attempts to process
-  /// the queue. Returns the job id so the caller (the bridge) can report
-  /// it back across to Svelte for correlation.
+  /// the queue. Returns the local job id for correlation.
   /// [force] bypasses the server-job guard below — it is what makes a manual
   /// reprint of an already-printed slip possible.
   Future<String> enqueue(Map<String, dynamic> receiptJson, {bool force = false}) async {
@@ -203,24 +202,30 @@ class PrintQueue {
 
   Future<void> _updateJob(PrintJob job) async {
     final jobs = await _loadJobs();
-    final idx = jobs.indexWhere((j) => j.id == job.id);
-    if (idx >= 0) {
-      jobs[idx] = job;
-    } else {
-      jobs.add(job);
-    }
+    if (!jobs.contains(job)) jobs.add(job); // pruned mid-print: keep its outcome
     await _saveJobs(jobs);
     _jobUpdates.add(job);
   }
 
+  /// The one job list every method mutates. Loaded once, then only changed
+  /// synchronously after an await — never "load, await, save" — so a Reverb
+  /// enqueue landing mid status-write can't overwrite it with a stale copy
+  /// (that turned a printed job back into `printing`, which the next launch
+  /// re-queued and printed again).
+  List<PrintJob>? _jobs;
+  Future<List<PrintJob>>? _loading;
+
   Future<List<PrintJob>> _loadJobs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
-    if (raw == null) return [];
-    final list = jsonDecode(raw) as List<dynamic>;
-    return list
-        .map((j) => PrintJob.fromJson(j as Map<String, dynamic>))
-        .toList();
+    if (_jobs != null) return _jobs!;
+    return _loading ??= () async {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      return _jobs = raw == null
+          ? <PrintJob>[]
+          : (jsonDecode(raw) as List<dynamic>)
+              .map((j) => PrintJob.fromJson(j as Map<String, dynamic>))
+              .toList();
+    }();
   }
 
   Future<void> _saveJobs(List<PrintJob> jobs) async {
@@ -232,6 +237,21 @@ class PrintQueue {
   Future<List<PrintJob>> failedJobs() async {
     final jobs = await _loadJobs();
     return jobs.where((j) => j.status == PrintJobStatus.failed).toList().reversed.toList();
+  }
+
+  /// Dismisses a job from the Gagal tab. Server side it is already marked
+  /// failed, so nothing else needs to know.
+  Future<void> remove(String jobId) async {
+    final jobs = await _loadJobs();
+    jobs.removeWhere((j) => j.id == jobId);
+    await _saveJobs(jobs);
+  }
+
+  /// Forgets every job — used when the device is reset/re-activated.
+  Future<void> clear() async {
+    final jobs = await _loadJobs();
+    jobs.clear();
+    await _saveJobs(jobs);
   }
 
   /// Call on app start. Drops successes, keeps the last [keepFailedCount]
@@ -268,7 +288,11 @@ class PrintQueue {
         .where((j) => j.status == PrintJobStatus.success && _age(j) < maxAge)
         .toList();
 
-    await _saveJobs([...unfinished, ...recentlyPrinted, ...trimmedFailed]);
+    final kept = [...unfinished, ...recentlyPrinted, ...trimmedFailed];
+    jobs
+      ..clear()
+      ..addAll(kept);
+    await _saveJobs(jobs);
   }
 
   /// Ids are microsecond timestamps (see [enqueue]), so they double as a clock.

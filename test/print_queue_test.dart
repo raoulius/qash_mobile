@@ -133,4 +133,29 @@ void main() {
 
     expect((await queue.failedJobs()).length, 1);
   });
+
+  test('concurrent enqueues from poll and push both survive', () async {
+    await _seed([]);
+    final queue = PrintQueue(printerService: BluetoothPrinterService());
+
+    // Poll and Reverb deliver different jobs in the same instant; a
+    // load-await-save queue kept only whichever wrote last.
+    await Future.wait([
+      queue.enqueue({'_jobType': 'kitchen_ticket', '_serverJobId': '90'}),
+      queue.enqueue({'_jobType': 'kitchen_ticket', '_serverJobId': '91'}),
+    ]);
+
+    final ids = (await _stored()).map((j) => j['receiptJson']['_serverJobId']).toSet();
+    expect(ids, {'90', '91'});
+  });
+
+  test('remove dismisses a failed job', () async {
+    await _seed([_job('1', 'failed', serverId: '80', attempts: 3)]);
+    final queue = PrintQueue(printerService: BluetoothPrinterService());
+
+    await queue.remove('1');
+
+    expect(await queue.failedJobs(), isEmpty);
+    expect(await _stored(), isEmpty);
+  });
 }

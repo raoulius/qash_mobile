@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -43,12 +44,17 @@ class ConfigService {
         // Shown on the backoffice Print Stations page next to the station.
         'device_name': await _deviceName(),
       });
-    final res = await sendNoRedirect(req).timeout(const Duration(seconds: 15));
-
-    if (res.statusCode != 200) {
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw Exception(body['message'] ?? 'Activation failed (${res.statusCode})');
+    final http.Response res;
+    try {
+      res = await sendNoRedirect(req).timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw Exception('Server tidak merespons. Periksa koneksi lalu coba lagi.');
+    } on Exception {
+      // SocketException / ClientException / HandshakeException: no route to it.
+      throw Exception('Tidak dapat terhubung ke server. Periksa koneksi internet.');
     }
+
+    if (res.statusCode != 200) throw Exception(_activationError(res));
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     final config = DeviceConfig(
@@ -65,6 +71,21 @@ class ConfigService {
     );
     await save(config);
     return config;
+  }
+
+  /// The body may not be JSON at all (a Cloudflare 5xx is HTML), so never
+  /// let a FormatException reach the cashier.
+  static String _activationError(http.Response res) {
+    Map<String, dynamic> body = const {};
+    try {
+      body = jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {}
+    return switch (res.statusCode) {
+      401 || 422 => 'Token aktivasi salah atau sudah dicabut.',
+      429 => 'Terlalu banyak percobaan. Coba lagi dalam '
+          '${((body['retry_after'] as num?) ?? 300) ~/ 60 + 1} menit.',
+      _ => 'Aktivasi gagal (server ${res.statusCode}). Coba lagi nanti.',
+    };
   }
 
   static Future<String?> _deviceName() async {

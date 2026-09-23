@@ -120,7 +120,14 @@ class BluetoothPrinterService {
   /// Attempts to reconnect to whichever printer was last successfully
   /// connected, without requiring the user to re-pick it from a list.
   /// Returns true if reconnection succeeded.
-  Future<bool> reconnectToLastKnown() async {
+  ///
+  /// Bootstrap, the 30s retry timer and PrintQueue all call this; concurrent
+  /// callers share the one attempt in flight instead of racing connect().
+  Future<bool> reconnectToLastKnown() =>
+      _reconnecting ??= _reconnect().whenComplete(() => _reconnecting = null);
+  Future<bool>? _reconnecting;
+
+  Future<bool> _reconnect() async {
     final prefs = await SharedPreferences.getInstance();
     final address = prefs.getString(_prefsKeyLastDeviceAddress);
     final name = prefs.getString(_prefsKeyLastDeviceName);
@@ -210,8 +217,6 @@ class BluetoothPrinterService {
 
   Future<void> _androidPrint(Uint8List bytes) async {
     final ok = await _androidManager.send(type: PrinterType.bluetooth, bytes: bytes.toList());
-    // ignore: avoid_print
-    print('[BT] send result: $ok  bytes=${bytes.length}');
     if (!ok) throw StateError('Print failed: send() returned false');
   }
 
