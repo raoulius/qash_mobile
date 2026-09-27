@@ -130,14 +130,15 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
     _printerService = BluetoothPrinterService();
     _printQueue = PrintQueue(printerService: _printerService);
     _pollService = PollService(
-      printerService: _printerService,
       printQueue: _printQueue,
       apiBaseUrl: cfg.apiBaseUrl,
       stationId: cfg.stationId,
       authToken: cfg.apiToken,
     );
     _reverbService = ReverbService(
-      printQueue: _printQueue,
+      // The socket only says "go fetch"; jobs always come from the poll.
+      onSubscription: _pollService.onPushSubscription,
+      onJobsWaiting: _pollService.onJobsWaiting,
       apiBaseUrl: cfg.apiBaseUrl,
       tenantId: cfg.tenantId,
       outletId: cfg.outletId,
@@ -308,8 +309,8 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
         builder: (ctx) => AlertDialog(
           title: const Text('Reset perangkat?'),
           content: const Text(
-              'Station ini akan berhenti mencetak sampai diaktifkan lagi '
-              'dengan token baru dari backoffice.'),
+              'Station ini akan berhenti mencetak sampai diaktifkan lagi dengan '
+              'kode baru dari "Pasangkan ulang" di halaman Print Stations.'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
             FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Reset')),
@@ -396,7 +397,8 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
                 const SizedBox(height: 8),
                 Text(
                   'Server menolak token station ini — dicabut di backoffice atau '
-                  'sudah diaktifkan di HP lain. Minta token baru ke admin.',
+                  'sudah diaktifkan di HP lain. Kode lama tidak bisa dipakai lagi: '
+                  'minta kode baru lewat "Pasangkan ulang" di halaman Print Stations.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant),

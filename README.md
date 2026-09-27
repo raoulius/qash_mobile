@@ -4,8 +4,8 @@ Print station app for Qash. It sits next to a Bluetooth ESC/POS receipt printer 
 
 Jobs arrive two ways, both feeding the same durable queue (`lib/app/printer/print_queue.dart`):
 
-- **Reverb push** (`reverb_service.dart`): the fast path.
-- **Polling** (`poll_service.dart`): every 4s, catches anything the socket missed, and acknowledges each job (`mark-printed` / `mark-failed`).
+- **Polling** (`poll_service.dart`): the only source of jobs. One loop per station: every 30s once the socket is up and the backend has sent `print.jobs-waiting`, otherwise every 4s; backs off to 60s on errors, honours `Retry-After`, stops on 401. Every poll reports the printer link (`printer`, `printer_name`) so the backoffice can flag a disconnected printer; a printer state change polls right away. Acknowledges each job (`mark-printed` / `mark-failed`) and never reprints a job id it already printed (kept 24h).
+- **Reverb** (`reverb_service.dart`): wake-up only. `print.jobs-waiting` triggers an immediate poll; the app never prints from a socket message.
 
 The queue deduplicates on the server job id, so a job is printed once even if both paths deliver it.
 
@@ -23,7 +23,7 @@ Test on a real Android phone (Bluetooth printing doesn't work in an emulator). D
 ## Activating a station
 
 1. In the backoffice, create a print station, or run `php artisan device:token` on the backend.
-2. Enter the 4-character token on the app's first screen.
+2. Enter the pairing code (4–12 characters, single-use, valid 15 minutes) on the app's first screen. A phone that lost its token needs a fresh code from **Pasangkan ulang** on the Print Stations page; the old code never works twice.
 3. Tap **Hubungkan / ganti printer**, pick the printer, then **Tes cetak**.
 
 Re-activating the same station on another phone rotates its token; the old phone then shows **Perangkat dinonaktifkan**.

@@ -81,7 +81,9 @@ class ConfigService {
       body = jsonDecode(res.body) as Map<String, dynamic>;
     } catch (_) {}
     return switch (res.statusCode) {
-      401 || 422 => 'Token aktivasi salah atau sudah dicabut.',
+      401 || 422 => 'Kode salah, sudah dipakai, atau kedaluwarsa (kode hanya berlaku '
+          'sekali, selama 15 menit). Tekan "Pasangkan ulang" di halaman Print '
+          'Stations untuk kode baru.',
       429 => 'Terlalu banyak percobaan. Coba lagi dalam '
           '${((body['retry_after'] as num?) ?? 300) ~/ 60 + 1} menit.',
       _ => 'Aktivasi gagal (server ${res.statusCode}). Coba lagi nanti.',

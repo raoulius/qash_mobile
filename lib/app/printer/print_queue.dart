@@ -1,6 +1,6 @@
 // print_queue.dart
 //
-// Sits between the job sources (poll_service.dart, reverb_service.dart) and
+// Sits between the job source (poll_service.dart) and
 // bluetooth_service.dart. Exists to
 // answer one question reliably: "what happens if the printer is briefly
 // disconnected, out of range, or the app gets killed mid-print?"
