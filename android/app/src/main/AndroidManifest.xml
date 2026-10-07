@@ -26,6 +26,9 @@
          (StationService). connectedDevice type: no time limit, fits a printer link. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- StationService holds a partial wake lock: without it the CPU sleeps with
+         the screen off and the poll timer stops, so the station reads offline. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- One-time "don't optimise battery" prompt (permissions.dart): OEM
          battery managers otherwise kill the station service. Play policy

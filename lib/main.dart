@@ -166,7 +166,10 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
     // Printer dropped (powered off, out of range): retry the last-known
     // device every 30s so the cashier doesn't have to notice and tap.
     _reconnectTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (_printerService.currentState == PrinterConnectionState.disconnected) {
+      // `error` too: a failed reconnect leaves that state, and skipping it meant
+      // a printer back in range was never picked up again.
+      final s = _printerService.currentState;
+      if (s == PrinterConnectionState.disconnected || s == PrinterConnectionState.error) {
         _printerService.reconnectToLastKnown();
       }
     });

@@ -178,7 +178,7 @@ class PrintQueue {
       if (printerService.connectedDevice == null) {
         final reconnected = await printerService.reconnectToLastKnown();
         if (!reconnected) {
-          throw StateError('Printer tidak terhubung dan belum pernah dipilih');
+          throw StateError('Printer tidak terhubung (mati atau di luar jangkauan Bluetooth)');
         }
       }
 
@@ -189,7 +189,8 @@ class PrintQueue {
       job.lastError = null;
       await _updateJob(job);
     } catch (e) {
-      job.lastError = e.toString();
+      // StateError.toString() prefixes "Bad state: ", which then shows up in the backoffice.
+      job.lastError = e is StateError ? e.message : e.toString();
 
       if (job.attempts >= _maxAttempts) {
         job.status = PrintJobStatus.failed;
