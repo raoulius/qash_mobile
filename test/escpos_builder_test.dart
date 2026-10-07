@@ -156,10 +156,45 @@ void main() {
       'cashier': {'name': 'Demo Admin'}, 'openingFloat': 125000, 'cashOrdersTotal': 50000, 'cashIn': 0, 'cashOut': 10000,
       'expectedCash': 165000, 'declaredCash': 160000, 'ordersCount': 3, 'ordersTotal': 90000, 'template': _template(),
     }));
-    expect(out, contains('TUTUP SESI'));
+    expect(out, contains('TUTUP KASIR'));
     expect(out, contains('Selisih'));
     expect(out, contains('-5.000'));
     expect(out, contains('Order dibayar'));
+  });
+
+  test('tutup kasir prints payments, sales, voids, items and orders; day close its own', () async {
+    final close = _text(await EscPosBuilder.buildFromJobPayload({
+      '_jobType': 'session_close', 'currency': 'IDR', 'outlet': {'name': 'Main Outlet'}, 'station': {'name': 'Kasir 1'},
+      'expectedCash': 500000, 'declaredCash': 495000, 'variance': -5000, 'meta': {'reprint': true},
+      'closing': {
+        'payments': [{'label': 'Tunai', 'orders': 3, 'total': 150000}, {'label': 'QRIS', 'orders': 2, 'total': 90000}],
+        'sales': {'orders': 5, 'gross': 240000, 'discount': 10000, 'tax': 21800, 'taxLines': [{'name': 'PB1 10%', 'amount': 21800}], 'average': 48000},
+        'voids': {'count': 1, 'total': 35000}, 'refunds': {'count': 0, 'total': 0},
+        'items': [{'name': 'Nasi Goreng', 'qty': 3, 'total': 105000}],
+        'orders': [{'no': '0007', 'time': '12:30', 'method': 'Tunai', 'total': 35000, 'status': 'cancelled'}],
+      },
+      'template': _template(paper: '58'),
+    }));
+    for (final s in ['TUTUP KASIR', 'CETAK ULANG', 'PEMBAYARAN', 'Tunai (3)', 'QRIS (2)', 'PB1 10%', 'Void (1)',
+                     'ITEM TERJUAL', '3x Nasi Goreng', 'DAFTAR PESANAN', '#0007 12:30 Tunai', 'BATAL', 'Supervisor']) {
+      expect(close, contains(s));
+    }
+
+    final day = _text(await EscPosBuilder.buildFromJobPayload({
+      '_jobType': 'day_close', 'currency': 'IDR', 'outlet': {'name': 'Main Outlet'}, 'businessDay': '2026-10-07',
+      'sales': {'orders': 12, 'subtotal': 600000, 'tax': 60000, 'total': 660000, 'net': 660000},
+      'payments': [{'label': 'Tunai', 'total': 400000}], 'voids': {'count': 0, 'total': 0},
+      'cash': {'openingFloat': 200000, 'expected': 600000, 'declared': 600000, 'variance': 0},
+      'sessions': [{'register': 'Kasir 1', 'cashier': 'Sari', 'variance': -5000}],
+      'template': _template(),
+    }));
+    for (final s in ['TUTUP HARI', '2026-10-07', 'PEMBAYARAN', 'KAS', 'PER REGISTER', 'Kasir 1 - Sari', '-5.000']) {
+      expect(day, contains(s));
+    }
+  });
+
+  test('a slip type this build does not know fails instead of printing a receipt', () async {
+    await expectLater(EscPosBuilder.buildFromJobPayload({'_jobType': 'something_new', 'template': _template()}), throwsStateError);
   });
 
   test('58mm keeps long values whole instead of truncating them', () async {

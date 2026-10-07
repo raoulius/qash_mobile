@@ -59,12 +59,16 @@ class EscPosBuilder {
       'table_qr' => _tableQr(g, payload, tpl),
       'session_open' => _sessionOpen(g, payload, tpl),
       'session_close' => _sessionClose(g, payload, tpl),
+      'day_close' => _dayClose(g, payload, tpl),
       'test_print' => _testPrint(g, payload, tpl),
-      _ => _receipt(g, payload, tpl),
+      'customer_receipt' || '' => _receipt(g, payload, tpl),
+      // A slip type this build does not know: fail the job (reported back as
+      // failed) rather than print it as a customer receipt.
+      _ => throw StateError('Jenis slip "$jobType" belum didukung — perbarui aplikasi'),
     };
 
     // Session slips carry the outlet under `outlet`, everything else under `header`.
-    final header = jobType.startsWith('session_')
+    final header = jobType.startsWith('session_') || jobType == 'day_close'
         ? {'outletName': _map(payload['outlet'])['name'], 'outletAddress': _map(payload['outlet'])['address']}
         : _map(payload['header']);
     return [
@@ -258,8 +262,9 @@ class EscPosBuilder {
     final variance = p['variance'] == null ? declared - expected : _n(p, 'variance');
     final cur = _s(p, 'currency') ?? 'IDR';
 
-    var b = g.text('TUTUP SESI', styles: _centerBold);
+    var b = g.text('TUTUP KASIR', styles: _centerBold);
     b += g.text('Z-REPORT', styles: _center);
+    b += _reprintMarker(g, p);
     b += g.hr();
     b += _sessionHeader(g, tpl, p);
     b += _kv(g, tpl, 'Dibuka', _local(p, 'openedAt'));
@@ -276,12 +281,128 @@ class EscPosBuilder {
     b += g.hr();
     b += _kv(g, tpl, 'Order dibayar', '${_n(p, 'ordersCount').toInt()}');
     b += _kv(g, tpl, 'Total penjualan', _money(_n(p, 'ordersTotal')));
+    if (p['closing'] is Map) b += _closingSections(g, tpl, _map(p['closing']), withSales: true);
     if (_s(p, 'note') != null) {
       b += g.hr();
       b += g.text('Catatan: ${_s(p, 'note')}');
     }
     return b;
   }
+
+  // ---- business-day closing slip -----------------------------------------
+
+  static List<int> _dayClose(Generator g, Map<String, dynamic> p, _Template tpl) {
+    final sales = _map(p['sales']);
+    final cash = _map(p['cash']);
+    final cur = _s(p, 'currency') ?? 'IDR';
+    final variance = _n(cash, 'variance');
+
+    var b = g.text('TUTUP HARI', styles: _centerBold);
+    b += _reprintMarker(g, p);
+    b += g.hr();
+    b += _kv(g, tpl, 'Hari Usaha', _s(p, 'businessDay'));
+    b += _kv(g, tpl, 'Dibuka', _local(p, 'openedAt'));
+    b += _kv(g, tpl, 'Ditutup', _local(p, 'closedAt'));
+    b += _kv(g, tpl, 'Oleh', _s(p, 'closedBy'));
+    b += g.hr();
+    b += g.text('PENJUALAN', styles: _bold);
+    b += _kv(g, tpl, 'Transaksi', '${_n(sales, 'orders').toInt()}');
+    b += _kv(g, tpl, 'Subtotal', _money(_n(sales, 'subtotal')));
+    if (_n(sales, 'discount') > 0) b += _kv(g, tpl, 'Diskon', '-${_money(_n(sales, 'discount'))}');
+    if (_n(sales, 'serviceCharge') > 0) b += _kv(g, tpl, 'Biaya layanan', _money(_n(sales, 'serviceCharge')));
+    b += _kv(g, tpl, 'Pajak', _money(_n(sales, 'tax')));
+    b += _kv(g, tpl, 'Total', '$cur ${_money(_n(sales, 'total'))}', bold: true);
+    if (_n(sales, 'refunds') > 0) b += _kv(g, tpl, 'Refund', '-${_money(_n(sales, 'refunds'))}');
+    b += _kv(g, tpl, 'Bersih', '$cur ${_money(_n(sales, 'net'))}', bold: true);
+    b += _closingSections(g, tpl, {'payments': p['payments'], 'voids': p['voids']}, withSales: false, signatures: false);
+    b += g.text('KAS', styles: _bold);
+    b += _kv(g, tpl, 'Modal Awal', _money(_n(cash, 'openingFloat')));
+    b += _kv(g, tpl, 'Seharusnya', _money(_n(cash, 'expected')));
+    b += _kv(g, tpl, 'Dihitung', _money(_n(cash, 'declared')));
+    b += _kv(g, tpl, 'Selisih', '${variance < 0 ? '-' : (variance > 0 ? '+' : '')}${_money(variance.abs())}', bold: true);
+    final sessions = _list(p['sessions']);
+    if (sessions.isNotEmpty) {
+      b += g.hr();
+      b += g.text('PER REGISTER', styles: _bold);
+      for (final raw in sessions) {
+        final r = _map(raw);
+        final v = _n(r, 'variance');
+        b += _line(g, tpl, '${_s(r, 'register') ?? '-'} - ${_s(r, 'cashier') ?? '-'}',
+            r['open'] == true ? 'BELUM DITUTUP' : '${v < 0 ? '-' : (v > 0 ? '+' : '')}${_money(v.abs())}');
+      }
+    }
+    b += _signatures(g, tpl);
+    return b;
+  }
+
+  /// Payments, sales lines, voids/refunds, items and orders of a closing slip
+  /// (print/partials/closing-sections.blade.php mirrors this for USB).
+  static List<int> _closingSections(Generator g, _Template tpl, Map<String, dynamic> c,
+      {required bool withSales, bool signatures = true}) {
+    var b = <int>[];
+    final payments = _list(c['payments']);
+    if (payments.isNotEmpty) {
+      b += g.hr();
+      b += g.text('PEMBAYARAN', styles: _bold);
+      for (final raw in payments) {
+        final pay = _map(raw);
+        final count = pay['orders'] == null ? '' : ' (${_n(pay, 'orders').toInt()})';
+        b += _kv(g, tpl, '${_s(pay, 'label') ?? '-'}$count', _money(_n(pay, 'total')));
+      }
+    }
+    final sales = _map(c['sales']);
+    if (withSales && sales.isNotEmpty) {
+      b += g.hr();
+      b += g.text('PENJUALAN', styles: _bold);
+      b += _kv(g, tpl, 'Transaksi', '${_n(sales, 'orders').toInt()}');
+      b += _kv(g, tpl, 'Penjualan kotor', _money(_n(sales, 'gross')));
+      if (_n(sales, 'discount') > 0) b += _kv(g, tpl, 'Diskon', '-${_money(_n(sales, 'discount'))}');
+      if (_n(sales, 'serviceCharge') > 0) b += _kv(g, tpl, 'Biaya layanan', _money(_n(sales, 'serviceCharge')));
+      final taxLines = _list(sales['taxLines']);
+      for (final raw in taxLines) {
+        final t = _map(raw);
+        b += _kv(g, tpl, _s(t, 'name') ?? 'Pajak', _money(_n(t, 'amount')));
+      }
+      if (taxLines.isEmpty && _n(sales, 'tax') > 0) b += _kv(g, tpl, 'Pajak', _money(_n(sales, 'tax')));
+      if (_n(sales, 'rounding') != 0) b += _kv(g, tpl, 'Pembulatan', _money(_n(sales, 'rounding')));
+      b += _kv(g, tpl, 'Rata-rata', _money(_n(sales, 'average')));
+    }
+    final voids = _map(c['voids']);
+    final refunds = _map(c['refunds']);
+    if (voids.isNotEmpty || refunds.isNotEmpty) {
+      b += g.hr();
+      b += g.text('VOID & REFUND', styles: _bold);
+      if (voids.isNotEmpty) b += _kv(g, tpl, 'Void (${_n(voids, 'count').toInt()})', _money(_n(voids, 'total')));
+      if (refunds.isNotEmpty) b += _kv(g, tpl, 'Refund (${_n(refunds, 'count').toInt()})', _money(_n(refunds, 'total')));
+    }
+    final items = _list(c['items']);
+    if (items.isNotEmpty) {
+      b += g.hr();
+      b += g.text('ITEM TERJUAL', styles: _bold);
+      for (final raw in items) {
+        final i = _map(raw);
+        final qty = _n(i, 'qty');
+        final q = qty == qty.roundToDouble() ? '${qty.toInt()}' : qty.toStringAsFixed(2);
+        b += _line(g, tpl, '${q}x ${_s(i, 'name') ?? '-'}', _money(_n(i, 'total')));
+      }
+    }
+    final orders = _list(c['orders']);
+    if (orders.isNotEmpty) {
+      b += g.hr();
+      b += g.text('DAFTAR PESANAN', styles: _bold);
+      const status = {'refunded': 'REFUND ', 'partially_refunded': 'REFUND SBG ', 'cancelled': 'BATAL '};
+      for (final raw in orders) {
+        final o = _map(raw);
+        b += _line(g, tpl, '#${_s(o, 'no') ?? '-'} ${_s(o, 'time') ?? ''} ${_s(o, 'method') ?? ''}',
+            '${status[o['status']] ?? ''}${_money(_n(o, 'total'))}');
+      }
+    }
+    if (signatures) b += _signatures(g, tpl);
+    return b;
+  }
+
+  static List<int> _signatures(Generator g, _Template tpl) =>
+      g.hr() + g.feed(2) + _line(g, tpl, 'Kasir ________', 'Supervisor ________');
 
   static List<int> _sessionHeader(Generator g, _Template tpl, Map<String, dynamic> p) {
     final station = _map(p['station']);
