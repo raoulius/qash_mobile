@@ -202,6 +202,7 @@ class PollService {
         'station_id': stationId,
         'printer': printer.currentState.name,
         if (printerName != null) 'printer_name': printerName,
+        if (printer.paperWidth != null) 'printer_paper': printer.paperWidth!,
       });
       final res = await sendNoRedirect(http.Request('GET', uri)..headers.addAll(_headers))
           .timeout(const Duration(seconds: 10));

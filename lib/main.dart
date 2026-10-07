@@ -216,6 +216,8 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
     _pollService.start();
     _reverbService.start();
 
+    await _printerService.loadPaperOverride();
+
     // Bluetooth reconnect runs in parallel; UI updates via connectionState stream.
     _printerService.reconnectToLastKnown().then((reconnected) {
       if (!reconnected && mounted) {
@@ -234,6 +236,8 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
   }
 
   void _onJobUpdate(PrintJob job) {
+    // A server job may carry a new slip width: refresh the paper row.
+    if (mounted) setState(() {});
     // In the foreground the overlay already says it; notify only when the
     // cashier is in another app.
     if (job.status == PrintJobStatus.success &&
@@ -261,17 +265,53 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
   }
 
   /// Local slip, no server job id: proves the printer link without touching
-  /// the backend. 58mm layout so it also fits the narrow RPP02N.
+  /// the backend. Laid out for the printer's paper (58mm when unknown, which
+  /// also fits the narrow RPP02N).
   Future<void> _testPrint() async {
     final cfg = widget.config;
     await _printQueue.enqueue({
       '_jobType': 'test_print',
-      'template': {'paperWidth': '58'},
+      'template': {'paperWidth': _printerService.paperWidth ?? '58'},
       'header': {'outletName': cfg.tenantId},
       'station': cfg.stationId,
       'printer': _printerService.connectedDevice?.name,
       'printedAt': DateTime.now().toString().substring(0, 16),
     });
+  }
+
+  String _paperText() {
+    final width = _printerService.paperWidth;
+    final how = _printerService.paperOverride == null ? 'otomatis' : 'diatur manual';
+    return width == null ? 'Belum diketahui — ketuk untuk memilih' : '$width mm ($how)';
+  }
+
+  /// The printer's paper vs what the slips are laid out for.
+  String? _paperMismatch() {
+    final printer = _printerService.paperWidth;
+    final slip = _printQueue.lastSlipPaper;
+    if (printer == null || slip == null || printer == slip) return null;
+    return 'Tidak cocok: struk diatur $slip mm, printer $printer mm. '
+        'Periksa ukuran kertas di pengaturan printer Qash.';
+  }
+
+  Future<void> _pickPaper() async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Lebar kertas printer'),
+        children: [
+          for (final (value, label) in [
+            ('auto', 'Otomatis (dari nama printer)'),
+            ('58', '58 mm (printer kecil)'),
+            ('80', '80 mm (printer kasir standar)'),
+          ])
+            SimpleDialogOption(onPressed: () => Navigator.pop(ctx, value), child: Text(label)),
+        ],
+      ),
+    );
+    if (choice == null) return;
+    await _printerService.setPaperOverride(choice == 'auto' ? null : choice);
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickPrinter() async {
@@ -468,6 +508,18 @@ class _StationScreenState extends State<StationScreen> with WidgetsBindingObserv
                     child: Column(
                       children: [
                         _StatusRow(icon: Icons.bluetooth, label: 'Printer', value: _printerStatus),
+                        const Divider(height: 24),
+                        InkWell(
+                          onTap: _pickPaper,
+                          child: _StatusRow(icon: Icons.straighten, label: 'Kertas', value: _paperText()),
+                        ),
+                        if (_paperMismatch() != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _paperMismatch()!,
+                            style: TextStyle(color: Theme.of(context).colorScheme.error),
+                          ),
+                        ],
                         const Divider(height: 24),
                         _StatusRow(icon: Icons.sync, label: 'Server', value: _pollStatus),
                         const Divider(height: 24),

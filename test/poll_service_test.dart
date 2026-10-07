@@ -231,6 +231,14 @@ void main() {
     await tearDownStation(tester);
   });
 
+  test('paper width is guessed from the printer name', () {
+    expect(BluetoothPrinterService.paperGuess('RPP02N'), '58');
+    expect(BluetoothPrinterService.paperGuess('POS-80C'), '80');
+    expect(BluetoothPrinterService.paperGuess('XP-58IIH'), '58');
+    expect(BluetoothPrinterService.paperGuess('YC Printer demo'), isNull);
+    expect(BluetoothPrinterService.paperGuess('Printer 1580'), isNull);
+  });
+
   testWidgets('every poll reports the printer; printer_name only while connected',
       (tester) async {
     await setUpStation(tester);
@@ -247,7 +255,7 @@ void main() {
       ..device = PrinterDeviceInfo(name: 'RPP02N', address: '00');
     await tester.pump(const Duration(seconds: 4));
     expect(server.pendingUrl!.queryParameters,
-        {'station_id': 'kitchen', 'printer': 'connected', 'printer_name': 'RPP02N'});
+        {'station_id': 'kitchen', 'printer': 'connected', 'printer_name': 'RPP02N', 'printer_paper': '58'});
     await tearDownStation(tester);
   });
 

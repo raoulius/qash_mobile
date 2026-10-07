@@ -80,6 +80,10 @@ class PrintQueue {
 
   PrintQueue({required this.printerService});
 
+  /// Paper width ('58'/'80') the last server job was laid out for; the station
+  /// screen compares it with the printer's.
+  String? lastSlipPaper;
+
   /// Enqueues a receipt for printing and immediately attempts to process
   /// the queue. Returns the local job id for correlation.
   /// [force] bypasses the server-job guard below — it is what makes a manual
@@ -95,6 +99,10 @@ class PrintQueue {
     // server job id, so a broken acknowledgement costs a stale row on the
     // server instead of an endless stack of paper.
     final serverId = receiptJson['_serverJobId']?.toString();
+    final template = receiptJson['template'];
+    if (serverId != null && template is Map && template['paperWidth'] != null) {
+      lastSlipPaper = template['paperWidth'].toString();
+    }
     if (!force && serverId != null) {
       for (final j in jobs) {
         if (j.receiptJson['_serverJobId']?.toString() == serverId &&

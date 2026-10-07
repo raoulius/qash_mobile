@@ -57,6 +57,7 @@ class PrinterDeviceInfo {
 class BluetoothPrinterService {
   static const _prefsKeyLastDeviceAddress = 'printer.lastDeviceAddress';
   static const _prefsKeyLastDeviceName = 'printer.lastDeviceName';
+  static const _prefsKeyPaper = 'printer.paperWidth';
 
   final _stateController = StreamController<PrinterConnectionState>.broadcast();
   Stream<PrinterConnectionState> get connectionState => _stateController.stream;
@@ -66,6 +67,41 @@ class BluetoothPrinterService {
 
   PrinterDeviceInfo? _connectedDevice;
   PrinterDeviceInfo? get connectedDevice => _connectedDevice;
+
+  // ---- Paper width ----------------------------------------------------
+  // A printer cannot be asked its paper width (the plugin never hands back
+  // what the printer replies), so: the width set by hand in the app, else a
+  // guess from the printer's name, else unknown. Reported on every poll; the
+  // backoffice and the station screen flag a slip width that differs.
+
+  /// '58' or '80' set by hand in the app; null = guess from the name.
+  String? paperOverride;
+
+  /// What this printer prints on: the override, else the name guess.
+  String? get paperWidth => paperOverride ?? paperGuess(connectedDevice?.name);
+
+  /// '58'/'80' from a printer's name, or null when it says nothing.
+  /// ponytail: name heuristic; the in-app override is the fix when it guesses wrong.
+  static String? paperGuess(String? name) {
+    final n = (name ?? '').toUpperCase();
+    if (n.contains('RPP02') || n.contains('PT-210') || n.contains('MTP-2')) return '58';
+    final m = RegExp(r'(?<![0-9])(58|80)(?![0-9])').firstMatch(n);
+    return m?.group(1);
+  }
+
+  Future<void> loadPaperOverride() async {
+    final saved = (await SharedPreferences.getInstance()).getString(_prefsKeyPaper);
+    paperOverride = saved == '58' || saved == '80' ? saved : null;
+  }
+
+  /// Saves the hand-set width ('58'/'80', null = automatic) and tells listeners
+  /// (the poll reports it at once).
+  Future<void> setPaperOverride(String? width) async {
+    paperOverride = width;
+    final prefs = await SharedPreferences.getInstance();
+    width == null ? await prefs.remove(_prefsKeyPaper) : await prefs.setString(_prefsKeyPaper, width);
+    if (!_stateController.isClosed) _stateController.add(_currentState);
+  }
 
   // ---- Public API (identical on both platforms) ----------------------
 
@@ -199,7 +235,9 @@ class BluetoothPrinterService {
   }
 
   Future<void> _androidConnect(PrinterDeviceInfo device) async {
-    await _androidManager.connect(
+    // The plugin reports a failed connect as `false`, not an error; ignoring it
+    // showed (and reported to the server) a printer that was never connected.
+    final ok = await _androidManager.connect(
       type: PrinterType.bluetooth,
       model: BluetoothPrinterInput(
         name: device.name,
@@ -208,6 +246,7 @@ class BluetoothPrinterService {
         autoConnect: true,
       ),
     );
+    if (!ok) throw StateError('Gagal terhubung ke printer');
   }
 
   Future<void> _androidDisconnect() async {
