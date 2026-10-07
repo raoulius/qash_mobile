@@ -45,6 +45,24 @@ int _count(String hay, String needle) => needle.allMatches(hay).length;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('copies are labelled; without a cutter they get a tear line and a pause', () async {
+    Map<String, dynamic> job(bool autoCut) => {
+          ..._receipt,
+          'template': {..._template(copies: 2), 'autoCut': autoCut, 'copyPauseSeconds': 5},
+        };
+    final torn = await EscPosBuilder.buildCopies(job(false));
+    expect(torn, hasLength(2));
+    expect(_text(torn[0]), contains('Salinan 1/2'));
+    expect(_text(torn[1]), contains('Salinan 2/2'));
+    expect(_text(torn[0]), contains('sobek di sini'));
+    expect(EscPosBuilder.copyPauseSeconds(job(false)), 5);
+
+    final cut = await EscPosBuilder.buildCopies(job(true));
+    expect(_text(cut[0]), isNot(contains('sobek di sini')));
+    expect(EscPosBuilder.copyPauseSeconds(job(true)), 0);
+    expect(EscPosBuilder.copyPauseSeconds(_receipt), 0); // one copy: nothing to wait for
+  });
+
   test('NPWP and the e-receipt QR print only when switched on', () async {
     Map<String, dynamic> receipt(bool on) => {
           ..._receipt,
@@ -105,7 +123,7 @@ void main() {
     expect(out, contains('Sesi 15'));
 
     out = _text(await EscPosBuilder.buildFromJobPayload({...kitchen, '_jobType': 'waiter_ticket'}));
-    expect(out, contains('PELAYAN'));
+    expect(out, contains('CHECKER'));
 
     out = _text(await EscPosBuilder.buildFromJobPayload({
       ...kitchen,

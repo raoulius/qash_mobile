@@ -33,8 +33,21 @@ class EscPosBuilder {
   // station reboots often and logo downloads get noticeable.
   static final Map<String, img.Image?> _logoCache = {};
 
-  /// Entry point used by PrintQueue. Payload must contain `_jobType`.
-  static Future<Uint8List> buildFromJobPayload(Map<String, dynamic> payload) async {
+  /// The whole job as one byte stream, every copy back to back.
+  static Future<Uint8List> buildFromJobPayload(Map<String, dynamic> payload) async =>
+      Uint8List.fromList([for (final copy in await buildCopies(payload)) ...copy]);
+
+  /// Seconds PrintQueue waits between copies so the last one can be torn off
+  /// (0 when the printer cuts by itself or there is a single copy).
+  static int copyPauseSeconds(Map<String, dynamic> payload) {
+    final tpl = _Template.from(payload['template']);
+    return tpl.copies > 1 && !tpl.autoCut ? tpl.copyPauseSeconds : 0;
+  }
+
+  /// Entry point used by PrintQueue: one byte stream per copy, so a printer
+  /// without a cutter gets a tear line and a pause between them. Payload must
+  /// contain `_jobType`.
+  static Future<List<Uint8List>> buildCopies(Map<String, dynamic> payload) async {
     final tpl = _Template.from(payload['template']);
     final profile = await CapabilityProfile.load();
     final g = Generator(tpl.paper, profile);
@@ -54,16 +67,21 @@ class EscPosBuilder {
     final header = jobType.startsWith('session_')
         ? {'outletName': _map(payload['outlet'])['name'], 'outletAddress': _map(payload['outlet'])['address']}
         : _map(payload['header']);
-    final one = <int>[
-      ..._top(g, tpl, logo, header),
-      ...body,
-      ..._bottom(g, tpl),
-      // Library cut() pads 5 blank lines; feed only what the tear needs, then
-      // the GS V cut command (ignored by cutterless printers, honoured by others).
-      ...g.feed(tearFeedLines),
-      ...g.rawBytes([0x1D, 0x56, 0x00]),
+    return [
+      for (var i = 1; i <= tpl.copies; i++)
+        Uint8List.fromList([
+          ..._top(g, tpl, logo, header),
+          ...body,
+          ..._bottom(g, tpl),
+          // Which copy this is, and where to tear when the printer cannot cut.
+          if (tpl.copies > 1) ...g.text('Salinan $i/${tpl.copies}', styles: _center),
+          if (tpl.copies > 1 && !tpl.autoCut) ...g.text('- - - - sobek di sini - - - -', styles: _center),
+          // Library cut() pads 5 blank lines; feed only what the tear needs, then
+          // the GS V cut command (ignored by cutterless printers, honoured by others).
+          ...g.feed(tearFeedLines),
+          ...g.rawBytes([0x1D, 0x56, 0x00]),
+        ]),
     ];
-    return Uint8List.fromList([for (var i = 0; i < tpl.copies; i++) ...one]);
   }
 
   // ---- shared top / bottom ----------------------------------------------
@@ -180,7 +198,7 @@ class EscPosBuilder {
     final isVoid = h['void'] == true;
     var b = <int>[];
 
-    b += g.text(isVoid ? 'BATAL' : (jobType == 'waiter_ticket' ? 'PELAYAN' : 'DAPUR'), styles: _centerBold2);
+    b += g.text(isVoid ? 'BATAL' : (jobType == 'waiter_ticket' ? 'CHECKER' : 'DAPUR'), styles: _centerBold2);
     if (_s(h, 'orderNumber') != null) b += g.text('#${_s(h, 'orderNumber')}', styles: _centerBold);
     if (isVoid && _s(h, 'orderReference') != null) b += g.text(_s(h, 'orderReference')!, styles: _center);
     b += _reprintMarker(g, p);
@@ -425,12 +443,14 @@ class EscPosBuilder {
 class _Template {
   final PaperSize paper;
   final int copies;
+  final bool autoCut;
+  final int copyPauseSeconds;
   final String? logoUrl;
   final List<String> headerLines;
   final List<String> footerLines;
   final Map<String, dynamic> _show;
 
-  _Template._(this.paper, this.copies, this.logoUrl, this.headerLines, this.footerLines, this._show);
+  _Template._(this.paper, this.copies, this.autoCut, this.copyPauseSeconds, this.logoUrl, this.headerLines, this.footerLines, this._show);
 
   /// Characters per line at the default font: the width every padded line is
   /// aligned to.
@@ -443,6 +463,8 @@ class _Template {
     return _Template._(
       t['paperWidth']?.toString() == '58' ? PaperSize.mm58 : PaperSize.mm80,
       copies.clamp(1, 3),
+      t['autoCut'] == true,
+      ((t['copyPauseSeconds'] as num?)?.toInt() ?? 5).clamp(0, 15),
       (logo == null || logo.isEmpty) ? null : logo,
       [for (final l in (t['headerLines'] as List? ?? [])) EscPosBuilder._safe(l.toString())],
       [for (final l in (t['footerLines'] as List? ?? [])) EscPosBuilder._safe(l.toString())],

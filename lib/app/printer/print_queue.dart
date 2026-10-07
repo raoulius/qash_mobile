@@ -190,8 +190,13 @@ class PrintQueue {
         }
       }
 
-      final bytes = await EscPosBuilder.buildFromJobPayload(job.receiptJson);
-      await printerService.printBytes(bytes);
+      // Copy by copy: a printer without a cutter needs time to tear each one off.
+      final copies = await EscPosBuilder.buildCopies(job.receiptJson);
+      final pause = Duration(seconds: EscPosBuilder.copyPauseSeconds(job.receiptJson));
+      for (var i = 0; i < copies.length; i++) {
+        if (i > 0) await Future<void>.delayed(pause);
+        await printerService.printBytes(copies[i]);
+      }
 
       job.status = PrintJobStatus.success;
       job.lastError = null;
