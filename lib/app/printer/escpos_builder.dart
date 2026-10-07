@@ -81,7 +81,9 @@ class EscPosBuilder {
     if (tpl.show('address') && _s(header, 'outletAddress') != null) {
       b += g.text(_s(header, 'outletAddress')!, styles: _center);
     }
-    // show.taxId: the server sends no NPWP yet — nothing to print.
+    if (tpl.show('taxId') && _s(header, 'taxId') != null) {
+      b += g.text('NPWP ${_s(header, 'taxId')!}', styles: _center);
+    }
     b += g.hr();
     return b;
   }
@@ -161,7 +163,13 @@ class EscPosBuilder {
     }
     if (_s(p, 'paymentRef') != null) b += _kv(g, tpl, 'Ref', _s(p, 'paymentRef'));
     if (_s(p, 'footer') != null) b += g.text(_s(p, 'footer')!, styles: _center);
-    // show.qr with qrContent ereceipt/feedback: no URL in the payload yet — skipped.
+    // "QR e-struk": the customer scans it for the e-receipt (same link as the email).
+    final ereceipt = _s(p, 'ereceiptUrl');
+    if (tpl.show('qr') && ereceipt != null) {
+      b += g.feed(1);
+      b += g.qrcode(ereceipt, size: QRSize.Size5);
+      b += g.text('Scan untuk e-struk', styles: _center);
+    }
     return b;
   }
 

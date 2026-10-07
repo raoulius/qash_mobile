@@ -45,6 +45,22 @@ int _count(String hay, String needle) => needle.allMatches(hay).length;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('NPWP and the e-receipt QR print only when switched on', () async {
+    Map<String, dynamic> receipt(bool on) => {
+          ..._receipt,
+          'header': {...(_receipt['header'] as Map<String, dynamic>), 'taxId': '01.234.567.8-901.000'},
+          'ereceiptUrl': 'https://demo.test/order/summary/abc',
+          'template': _template(show: {'taxId': on, 'qr': on}),
+        };
+    final withBoth = _text(await EscPosBuilder.buildFromJobPayload(receipt(true)));
+    expect(withBoth, contains('NPWP 01.234.567.8-901.000'));
+    expect(withBoth, contains('Scan untuk e-struk'));
+
+    final without = _text(await EscPosBuilder.buildFromJobPayload(receipt(false)));
+    expect(without, isNot(contains('NPWP')));
+    expect(without, isNot(contains('Scan untuk e-struk')));
+  });
+
   test('customer receipt honours template, money lines and reprint marker', () async {
     final out = _text(await EscPosBuilder.buildFromJobPayload(_receipt));
     expect(out, contains('DANKE SCHON')); // header line replaces outlet name, uppercased
