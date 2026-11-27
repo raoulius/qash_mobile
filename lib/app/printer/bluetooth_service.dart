@@ -1,10 +1,9 @@
 // bluetooth_service.dart
 //
-// THIS IS THE FILE TO TEST FIRST, IN ISOLATION, AGAINST THE REAL RPP02N —
-// before wiring it into the bridge or anything else. Everything upstream
-// (printer_bridge.dart, the Svelte app) assumes this file's public API
-// works exactly as declared. If it doesn't, that's a contained, one-file
-// problem, not a tangled one.
+// The only file that talks to the printer hardware. Everything upstream
+// (print_queue.dart and the station screen) assumes this file's public API
+// works exactly as declared, so test it against the real RPP02N first when
+// something prints wrong — it's a contained, one-file problem.
 //
 // WHY ANDROID AND iOS ARE HANDLED DIFFERENTLY (read this before editing):
 //
@@ -58,6 +57,7 @@ class PrinterDeviceInfo {
 class BluetoothPrinterService {
   static const _prefsKeyLastDeviceAddress = 'printer.lastDeviceAddress';
   static const _prefsKeyLastDeviceName = 'printer.lastDeviceName';
+  static const _prefsKeyPaper = 'printer.paperWidth';
 
   final _stateController = StreamController<PrinterConnectionState>.broadcast();
   Stream<PrinterConnectionState> get connectionState => _stateController.stream;
@@ -67,6 +67,41 @@ class BluetoothPrinterService {
 
   PrinterDeviceInfo? _connectedDevice;
   PrinterDeviceInfo? get connectedDevice => _connectedDevice;
+
+  // ---- Paper width ----------------------------------------------------
+  // A printer cannot be asked its paper width (the plugin never hands back
+  // what the printer replies), so: the width set by hand in the app, else a
+  // guess from the printer's name, else unknown. Reported on every poll; the
+  // backoffice and the station screen flag a slip width that differs.
+
+  /// '58' or '80' set by hand in the app; null = guess from the name.
+  String? paperOverride;
+
+  /// What this printer prints on: the override, else the name guess.
+  String? get paperWidth => paperOverride ?? paperGuess(connectedDevice?.name);
+
+  /// '58'/'80' from a printer's name, or null when it says nothing.
+  /// ponytail: name heuristic; the in-app override is the fix when it guesses wrong.
+  static String? paperGuess(String? name) {
+    final n = (name ?? '').toUpperCase();
+    if (n.contains('RPP02') || n.contains('PT-210') || n.contains('MTP-2')) return '58';
+    final m = RegExp(r'(?<![0-9])(58|80)(?![0-9])').firstMatch(n);
+    return m?.group(1);
+  }
+
+  Future<void> loadPaperOverride() async {
+    final saved = (await SharedPreferences.getInstance()).getString(_prefsKeyPaper);
+    paperOverride = saved == '58' || saved == '80' ? saved : null;
+  }
+
+  /// Saves the hand-set width ('58'/'80', null = automatic) and tells listeners
+  /// (the poll reports it at once).
+  Future<void> setPaperOverride(String? width) async {
+    paperOverride = width;
+    final prefs = await SharedPreferences.getInstance();
+    width == null ? await prefs.remove(_prefsKeyPaper) : await prefs.setString(_prefsKeyPaper, width);
+    if (!_stateController.isClosed) _stateController.add(_currentState);
+  }
 
   // ---- Public API (identical on both platforms) ----------------------
 
@@ -108,7 +143,7 @@ class BluetoothPrinterService {
   /// are expected to call connect()/reconnectToLastKnown() first.
   Future<void> printBytes(Uint8List bytes) async {
     if (_connectedDevice == null) {
-      throw StateError('No printer connected');
+      throw StateError('Printer tidak terhubung');
     }
     if (Platform.isAndroid) {
       await _androidPrint(bytes);
@@ -120,7 +155,14 @@ class BluetoothPrinterService {
   /// Attempts to reconnect to whichever printer was last successfully
   /// connected, without requiring the user to re-pick it from a list.
   /// Returns true if reconnection succeeded.
-  Future<bool> reconnectToLastKnown() async {
+  ///
+  /// Bootstrap, the 30s retry timer and PrintQueue all call this; concurrent
+  /// callers share the one attempt in flight instead of racing connect().
+  Future<bool> reconnectToLastKnown() =>
+      _reconnecting ??= _reconnect().whenComplete(() => _reconnecting = null);
+  Future<bool>? _reconnecting;
+
+  Future<bool> _reconnect() async {
     final prefs = await SharedPreferences.getInstance();
     final address = prefs.getString(_prefsKeyLastDeviceAddress);
     final name = prefs.getString(_prefsKeyLastDeviceName);
@@ -147,6 +189,7 @@ class BluetoothPrinterService {
   }
 
   void dispose() {
+    _btStateSub?.cancel();
     _stateController.close();
   }
 
@@ -155,6 +198,20 @@ class BluetoothPrinterService {
   // false is what selects Classic over BLE.
 
   final _androidManager = PrinterManager.instance;
+  StreamSubscription<BTStatus>? _btStateSub;
+
+  BluetoothPrinterService() {
+    if (Platform.isAndroid) {
+      // The plugin reports the socket dropping (printer off / out of range);
+      // without this the UI says "connected" until the next job fails.
+      _btStateSub = _androidManager.stateBluetooth.listen((status) {
+        if (status == BTStatus.none && _connectedDevice != null) {
+          _connectedDevice = null;
+          _setState(PrinterConnectionState.disconnected);
+        }
+      });
+    }
+  }
 
   Future<List<PrinterDeviceInfo>> _androidScan(Duration timeout) async {
     final found = <PrinterDeviceInfo>[];
@@ -164,7 +221,7 @@ class BluetoothPrinterService {
         .discovery(type: PrinterType.bluetooth, isBle: false)
         .listen((device) {
       found.add(PrinterDeviceInfo(
-        name: device.name ?? 'Unknown printer',
+        name: device.name,
         address: device.address ?? '',
       ));
     });
@@ -178,7 +235,9 @@ class BluetoothPrinterService {
   }
 
   Future<void> _androidConnect(PrinterDeviceInfo device) async {
-    await _androidManager.connect(
+    // The plugin reports a failed connect as `false`, not an error; ignoring it
+    // showed (and reported to the server) a printer that was never connected.
+    final ok = await _androidManager.connect(
       type: PrinterType.bluetooth,
       model: BluetoothPrinterInput(
         name: device.name,
@@ -187,6 +246,7 @@ class BluetoothPrinterService {
         autoConnect: true,
       ),
     );
+    if (!ok) throw StateError('Gagal terhubung ke printer');
   }
 
   Future<void> _androidDisconnect() async {
@@ -195,9 +255,7 @@ class BluetoothPrinterService {
 
   Future<void> _androidPrint(Uint8List bytes) async {
     final ok = await _androidManager.send(type: PrinterType.bluetooth, bytes: bytes.toList());
-    // ignore: avoid_print
-    print('[BT] send result: $ok  bytes=${bytes.length}');
-    if (!ok) throw StateError('Print failed: send() returned false');
+    if (!ok) throw StateError('Printer tidak merespons');
   }
 
   // ---- iOS implementation (ExternalAccessory / MFi Classic) -----------
@@ -224,7 +282,7 @@ class BluetoothPrinterService {
     return (result ?? [])
         .cast<Map<Object?, Object?>>()
         .map((m) => PrinterDeviceInfo(
-              name: m['name'] as String? ?? 'Unknown printer',
+              name: m['name'] as String? ?? 'Printer tanpa nama',
               address: m['address'] as String? ?? '',
             ))
         .toList();

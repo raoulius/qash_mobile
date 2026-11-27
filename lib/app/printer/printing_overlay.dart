@@ -6,8 +6,40 @@
 // reflects how long the real print actually took.
 
 import 'package:flutter/material.dart';
+import 'print_queue.dart';
 
 enum PrintingOverlayState { hidden, printing, success }
+
+/// Decides what the overlay shows across a whole burst of jobs.
+///
+/// Driven by raw PrintQueue events the overlay flashed once per event: a poll
+/// that returns several pending receipts ran a full show/flash/hide cycle per
+/// receipt, and a retry — which puts a job back to `queued` between attempts —
+/// re-triggered the animation on every backoff. Here a job counts as in flight
+/// from its first event until it succeeds or fails, so the overlay stays up for
+/// the whole burst and flashes success once, at the end.
+class PrintingOverlayTracker {
+  final _inFlight = <String>{};
+  bool _lastSucceeded = false;
+
+  /// The state the overlay should be in after [status] for [jobId].
+  PrintingOverlayState onJob(String jobId, PrintJobStatus status) {
+    switch (status) {
+      case PrintJobStatus.queued:
+      case PrintJobStatus.printing:
+        _inFlight.add(jobId);
+      case PrintJobStatus.success:
+        _inFlight.remove(jobId);
+        _lastSucceeded = true;
+      case PrintJobStatus.failed:
+        _inFlight.remove(jobId);
+        _lastSucceeded = false;
+    }
+
+    if (_inFlight.isNotEmpty) return PrintingOverlayState.printing;
+    return _lastSucceeded ? PrintingOverlayState.success : PrintingOverlayState.hidden;
+  }
+}
 
 class PrintingOverlay extends StatefulWidget {
   final PrintingOverlayState state;
@@ -115,7 +147,7 @@ class _PrinterFeed extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 32),
-        Text('Printing receipt…', style: Theme.of(context).textTheme.titleMedium),
+        Text('Mencetak struk…', style: Theme.of(context).textTheme.titleMedium),
       ],
     );
   }
@@ -132,7 +164,7 @@ class _PrintedCheck extends StatelessWidget {
       children: [
         Icon(Icons.check_circle, color: scheme.primary, size: 80),
         const SizedBox(height: 16),
-        Text('Printed!', style: Theme.of(context).textTheme.titleLarge),
+        Text('Tercetak!', style: Theme.of(context).textTheme.titleLarge),
       ],
     );
   }

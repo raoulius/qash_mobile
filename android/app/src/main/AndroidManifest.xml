@@ -22,11 +22,28 @@
          this at runtime too; requested via permission_handler. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Foreground service keeps the poll loop alive when the app is backgrounded
+         (StationService). connectedDevice type: no time limit, fits a printer link. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- StationService holds a partial wake lock: without it the CPU sleeps with
+         the screen off and the poll timer stops, so the station reads offline. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- One-time "don't optimise battery" prompt (permissions.dart): OEM
+         battery managers otherwise kill the station service. Play policy
+         restricts this permission — if the listing is rejected, drop it and
+         deep-link to Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
-        android:label="qash_mobile"
+        android:label="Qash Mobile"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:allowBackup="false">
+        <!-- allowBackup=false: the station's API token lives in SharedPreferences;
+             a cloud backup restored onto another phone would clone this station.
+             Cleartext HTTP is allowed in debug builds only (src/debug manifest). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -49,6 +66,10 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <service
+            android:name=".StationService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

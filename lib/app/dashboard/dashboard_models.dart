@@ -127,6 +127,7 @@ class DashboardStats {
 
 Color _colorFromHex(String? hex) {
   if (hex == null || hex.isEmpty) return Colors.grey;
-  final cleaned = hex.replaceFirst('#', '');
-  return Color(int.parse('FF$cleaned', radix: 16));
+  // One malformed colour must not fail the whole dashboard.
+  final rgb = int.tryParse(hex.replaceFirst('#', ''), radix: 16);
+  return rgb == null ? Colors.grey : Color(0xFF000000 | rgb);
 }

@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../net.dart';
@@ -36,13 +39,22 @@ class ConfigService {
     final uri = Uri.parse('$centralUrl/api/device/activate');
     final req = http.Request('POST', uri)
       ..headers.addAll({'Accept': 'application/json', 'Content-Type': 'application/json'})
-      ..body = jsonEncode({'activation_token': token.trim().toUpperCase()});
-    final res = await sendNoRedirect(req).timeout(const Duration(seconds: 15));
-
-    if (res.statusCode != 200) {
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw Exception(body['message'] ?? 'Activation failed (${res.statusCode})');
+      ..body = jsonEncode({
+        'activation_token': token.trim().toUpperCase(),
+        // Shown on the backoffice Print Stations page next to the station.
+        'device_name': await _deviceName(),
+      });
+    final http.Response res;
+    try {
+      res = await sendNoRedirect(req).timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw Exception('Server tidak merespons. Periksa koneksi lalu coba lagi.');
+    } on Exception {
+      // SocketException / ClientException / HandshakeException: no route to it.
+      throw Exception('Tidak dapat terhubung ke server. Periksa koneksi internet.');
     }
+
+    if (res.statusCode != 200) throw Exception(_activationError(res));
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     final config = DeviceConfig(
@@ -59,6 +71,34 @@ class ConfigService {
     );
     await save(config);
     return config;
+  }
+
+  /// The body may not be JSON at all (a Cloudflare 5xx is HTML), so never
+  /// let a FormatException reach the cashier.
+  static String _activationError(http.Response res) {
+    Map<String, dynamic> body = const {};
+    try {
+      body = jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {}
+    return switch (res.statusCode) {
+      401 || 422 => 'Kode salah, sudah dipakai, atau kedaluwarsa (kode hanya berlaku '
+          'sekali, selama 15 menit). Tekan "Pasangkan ulang" di halaman Print '
+          'Stations untuk kode baru.',
+      429 => 'Terlalu banyak percobaan. Coba lagi dalam '
+          '${((body['retry_after'] as num?) ?? 300) ~/ 60 + 1} menit.',
+      _ => 'Aktivasi gagal (server ${res.statusCode}). Coba lagi nanti.',
+    };
+  }
+
+  static Future<String?> _deviceName() async {
+    try {
+      if (Platform.isAndroid) {
+        final a = await DeviceInfoPlugin().androidInfo;
+        return '${a.manufacturer} ${a.model}'.trim();
+      }
+      if (Platform.isIOS) return (await DeviceInfoPlugin().iosInfo).name;
+    } catch (_) {}
+    return null;
   }
 
   static DeviceConfig _fromMap(Map<String, dynamic> m) => DeviceConfig(

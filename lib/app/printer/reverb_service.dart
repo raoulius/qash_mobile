@@ -1,27 +1,18 @@
 // reverb_service.dart
 //
-// Push delivery via Laravel Reverb (Pusher-compatible WebSocket protocol).
-// Subscribes to the station's private channel and feeds incoming print-job
-// events directly into the existing PrintQueue — no polling needed for jobs
-// that arrive while the socket is open.
-//
-// RELATIONSHIP WITH poll_service.dart:
-// Both services feed the SAME PrintQueue. Reverb is the fast path (jobs
-// print the moment they're created); polling is the fallback that catches
-// jobs missed while the socket was down or the app was backgrounded.
-// Running both in parallel is safe because PrintQueue's deduplication key
-// is the Laravel job id stored in the receipt payload — duplicate enqueues
-// for the same id are not a concern here because the server only delivers
-// each job once per channel event, and polling only picks up jobs still
-// marked 'pending' (already marked printed = not returned).
+// Wake-up channel via Laravel Reverb (Pusher-compatible WebSocket protocol).
+// Subscribes to the station's private channel and tells PollService when to
+// fetch. It NEVER prints: `print.jobs-waiting` carries only {station_id}, and
+// the job itself always comes from GET /print-jobs/pending. Printing a pushed
+// payload as well as the polled copy is what printed a job twice (2026-09-15).
 //
 // PUSHER PROTOCOL SUMMARY (what this file implements):
 //   1. Connect WS to wss://{host}:{port}/app/{appKey}?protocol=7
 //   2. Server → pusher:connection_established  (contains socket_id)
 //   3. Client → POST /api/broadcasting/auth to get channel auth token
 //   4. Client → pusher:subscribe with auth token
-//   5. Server → pusher_internal:subscription_succeeded
-//   6. Server → "print-job.created" events on the channel
+//   5. Server → pusher_internal:subscription_succeeded  → onSubscription(true)
+//   6. Server → "print.jobs-waiting" on the channel     → onJobsWaiting()
 //   7. Client → pusher:pong when server sends pusher:ping (keep-alive)
 
 import 'dart:async';
@@ -29,10 +20,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../net.dart';
-import 'print_queue.dart';
 
 class ReverbService {
-  final PrintQueue printQueue;
+  /// Subscription came up (true) or the socket went away (false).
+  final void Function(bool subscribed) onSubscription;
+
+  /// `print.jobs-waiting` arrived: jobs are pending, go fetch them.
+  final void Function() onJobsWaiting;
 
   /// Absolute tenant API root from the server, e.g.
   /// 'https://demo-cafe.withqash-demo.tech/api'. Never assembled client-side.
@@ -65,6 +59,7 @@ class ReverbService {
   WebSocket? _socket;
   Timer? _reconnectTimer;
   bool _disposed = false;
+  bool _subscribed = false;
 
   final _statusController = StreamController<String>.broadcast();
   Stream<String> get status => _statusController.stream;
@@ -73,7 +68,8 @@ class ReverbService {
       'private-tenant.$tenantId.outlet.$outletId.station.$stationId';
 
   ReverbService({
-    required this.printQueue,
+    required this.onSubscription,
+    required this.onJobsWaiting,
     required this.apiBaseUrl,
     required this.tenantId,
     required this.outletId,
@@ -91,18 +87,21 @@ class ReverbService {
 
   Future<void> _connect() async {
     if (_disposed) return;
-    _emit('connecting…');
+    _emit('Menghubungkan…');
     try {
       final scheme = secure ? 'wss' : 'ws';
       final uri =
           '$scheme://$reverbHost:$reverbPort/app/$appKey?protocol=7&client=flutter&version=1.0&flash=false';
 
-      // ignore: avoid_print
-      print('[Reverb] connecting to $uri');
       _socket = await WebSocket.connect(uri);
-      // ignore: avoid_print
-      print('[Reverb] socket connected');
-      _emit('connected');
+      if (_disposed) {
+        await _socket!.close(); // reset while connecting
+        return;
+      }
+      // A silently dead link (Wi-Fi gone, no FIN) otherwise looks open until
+      // TCP gives up, and polling would stay at 30 s all that time.
+      _socket!.pingInterval = const Duration(seconds: 25);
+      _emit('Terhubung');
 
       _socket!.listen(
         _onMessage,
@@ -111,16 +110,12 @@ class ReverbService {
         cancelOnError: true,
       );
     } catch (e) {
-      // ignore: avoid_print
-      print('[Reverb] connect failed: $e');
-      _emit('ws error: $e');
+      _emit('Gagal terhubung — mencoba lagi');
       _scheduleReconnect();
     }
   }
 
   void _onMessage(dynamic raw) {
-    // ignore: avoid_print
-    print('[Reverb] message: $raw');
     if (raw is! String) return;
     final Map<String, dynamic> msg;
     try {
@@ -140,55 +135,36 @@ class ReverbService {
       case 'pusher:ping':
         _send({'event': 'pusher:pong', 'data': {}});
 
-      case 'print-job.created':
-        _handlePrintJob(msg);
+      case 'pusher_internal:subscription_succeeded':
+        _emit('Aktif');
+        _subscribed = true;
+        onSubscription(true);
+
+      case 'pusher:subscription_error':
+        _socket?.close(); // reconnect loop retries with a fresh auth
+
+      case 'print.jobs-waiting':
+        onJobsWaiting();
     }
   }
 
   Future<void> _subscribeChannel(String socketId) async {
-    _emit('authenticating…');
+    _emit('Autentikasi…');
     try {
       final auth = await _fetchChannelAuth(socketId);
       _send({
         'event': 'pusher:subscribe',
         'data': {'channel': _channelName, 'auth': auth},
       });
-      _emit('subscribed');
     } catch (e) {
-      // ignore: avoid_print
-      print('[Reverb] auth exception: $e');
-      _emit('channel auth failed');
+      _emit('Autentikasi gagal — mencoba lagi');
       // Close socket so the reconnect loop retries with a fresh connection
       _socket?.close();
     }
   }
 
-  Future<String> _handlePrintJob(Map<String, dynamic> msg) async {
-    final rawData = msg['data'];
-    final Map<String, dynamic> data;
-    try {
-      data = rawData is String
-          ? jsonDecode(rawData) as Map<String, dynamic>
-          : rawData as Map<String, dynamic>;
-    } catch (_) {
-      return '';
-    }
-
-    final payload = data['payload'] as Map<String, dynamic>?;
-    if (payload == null) return '';
-
-    // Merge job_type so EscPosBuilder can dispatch to the right template.
-    // poll_service owns mark-printed; we just fast-path enqueue here.
-    return await printQueue.enqueue({
-      '_jobType': data['job_type'] as String? ?? '',
-      ...payload,
-    });
-  }
-
   Future<String> _fetchChannelAuth(String socketId) async {
     final uri = Uri.parse('$apiBaseUrl/broadcasting/auth');
-    // ignore: avoid_print
-    print('[Reverb] auth POST to $uri  socket=$socketId  channel=$_channelName');
     final req = http.Request('POST', uri)
       ..headers.addAll({
         'Authorization': 'Bearer $apiToken',
@@ -200,8 +176,6 @@ class ReverbService {
       };
     final res = await sendNoRedirect(req).timeout(const Duration(seconds: 10));
 
-    // ignore: avoid_print
-    print('[Reverb] auth response ${res.statusCode}: ${res.body}');
     if (res.statusCode != 200) {
       throw Exception('broadcasting auth failed: ${res.statusCode}');
     }
@@ -218,8 +192,12 @@ class ReverbService {
 
   void _onDisconnect() {
     _socket = null;
+    if (_subscribed) {
+      _subscribed = false;
+      if (!_disposed) onSubscription(false);
+    }
     if (!_disposed) {
-      _emit('disconnected — reconnecting…');
+      _emit('Terputus — menyambung ulang…');
       _scheduleReconnect();
     }
   }
@@ -230,7 +208,9 @@ class ReverbService {
     _reconnectTimer = Timer(const Duration(seconds: 5), _connect);
   }
 
-  void _emit(String s) => _statusController.add(s);
+  void _emit(String s) {
+    if (!_disposed) _statusController.add(s);
+  }
 
   void dispose() {
     _disposed = true;

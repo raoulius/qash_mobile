@@ -17,6 +17,7 @@
 import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class BluetoothPermissionResult {
   final bool granted;
@@ -44,25 +45,46 @@ class BluetoothPermissions {
     // Other platforms (web, desktop) aren't part of this app's target set.
     return const BluetoothPermissionResult(
       false,
-      'Unsupported platform for Bluetooth printing',
+      'Platform ini tidak mendukung printer Bluetooth',
     );
   }
 
-  static Future<BluetoothPermissionResult> _ensureAndroidGranted() async {
-    final sdkInt = await _androidSdkInt();
+  /// Xiaomi/Oppo/Vivo battery managers kill even a foreground service, which
+  /// silently stops the poll loop. Asks once per install; the answer is the
+  /// cashier's (or owner's) to give, so a refusal is never re-prompted.
+  static Future<void> askBatteryExemptionOnce() async {
+    if (!Platform.isAndroid) return;
+    const key = 'station.batteryExemptionAsked';
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(key) ?? false) return;
+    await prefs.setBool(key, true);
+    await Permission.ignoreBatteryOptimizations.request();
+  }
 
-    final List<Permission> required;
-    if (sdkInt >= 31) {
-      // Android 12+: explicit scan/connect permissions.
-      required = [Permission.bluetoothScan, Permission.bluetoothConnect];
-    } else {
-      // Android < 12: scanning needs location; legacy bluetooth/bluetoothAdmin
-      // are install-time (manifest-only) on these versions, no runtime prompt
-      // needed for them.
-      required = [Permission.locationWhenInUse];
+  /// Checks without prompting — for re-checking when the cashier comes back
+  /// from system Settings (the prompt itself pauses/resumes the app, so
+  /// prompting on resume would loop).
+  static Future<bool> isGranted() async {
+    if (!Platform.isAndroid) return Platform.isIOS;
+    for (final p in await _androidRequired()) {
+      if (!await p.isGranted) return false;
     }
+    return true;
+  }
 
-    final statuses = await required.request();
+  static Future<List<Permission>> _androidRequired() async {
+    if (await _androidSdkInt() >= 31) {
+      // Android 12+: explicit scan/connect permissions.
+      return [Permission.bluetoothScan, Permission.bluetoothConnect];
+    }
+    // Android < 12: scanning needs location; legacy bluetooth/bluetoothAdmin
+    // are install-time (manifest-only) on these versions, no runtime prompt
+    // needed for them.
+    return [Permission.locationWhenInUse];
+  }
+
+  static Future<BluetoothPermissionResult> _ensureAndroidGranted() async {
+    final statuses = await (await _androidRequired()).request();
 
     final allGranted = statuses.values.every((s) => s.isGranted);
     if (allGranted) return const BluetoothPermissionResult(true);
@@ -73,9 +95,8 @@ class BluetoothPermissions {
     return BluetoothPermissionResult(
       false,
       anyPermanentlyDenied
-          ? 'Bluetooth permission was denied permanently. '
-              'Enable it from system Settings to use the printer.'
-          : 'Bluetooth permission is required to scan for the printer.',
+          ? 'Izin Bluetooth ditolak. Aktifkan di Pengaturan agar printer bisa dipakai.'
+          : 'Izin Bluetooth diperlukan untuk mencari printer.',
     );
   }
 

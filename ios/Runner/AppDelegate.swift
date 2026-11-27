@@ -16,5 +16,18 @@ import UIKit
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     printerEAChannel = PrinterEAChannel(messenger: engineBridge.applicationRegistrar.messenger())
+
+    // "qash/station" (lib/app/station_native.dart): iOS has no foreground
+    // service, so an active station just keeps the screen from sleeping —
+    // polling only runs while the app is in front.
+    FlutterMethodChannel(name: "qash/station", binaryMessenger: engineBridge.applicationRegistrar.messenger())
+      .setMethodCallHandler { call, result in
+        if call.method == "keepScreenOn" {
+          UIApplication.shared.isIdleTimerDisabled = (call.arguments as? Bool) ?? false
+          result(nil)
+        } else {
+          result(FlutterMethodNotImplemented)
+        }
+      }
   }
 }
