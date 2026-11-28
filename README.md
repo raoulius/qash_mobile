@@ -16,7 +16,7 @@ flutter pub get
 flutter run --dart-define=CENTRAL_URL=https://withqash-demo.tech
 ```
 
-`CENTRAL_URL` defaults to `https://qash.id` (production). Activation always goes to `{CENTRAL_URL}/api/device/activate`; the server answers with the tenant's own API and Reverb settings.
+`CENTRAL_URL` defaults to `https://withqash.com` (production). Activation always goes to `{CENTRAL_URL}/api/device/activate`; the server answers with the tenant's own API and Reverb settings.
 
 Test on a real Android phone (Bluetooth printing doesn't work in an emulator). Debug builds allow `http://` backends; release builds don't.
 

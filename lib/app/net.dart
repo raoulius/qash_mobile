@@ -6,7 +6,7 @@ import 'package:http/io_client.dart';
 /// The central Qash domain every device activates against. Override per
 /// build with `--dart-define=CENTRAL_URL=https://withqash-demo.tech` for
 /// demo/staging builds; production doesn't need to pass anything.
-const centralUrl = String.fromEnvironment('CENTRAL_URL', defaultValue: 'https://qash.id');
+const centralUrl = String.fromEnvironment('CENTRAL_URL', defaultValue: 'https://withqash.com');
 
 /// One client for every call, so polls reuse the open TLS connection instead
 /// of a handshake each time (a bare `request.send()` builds and closes a
